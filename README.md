@@ -17,9 +17,14 @@ LIVE=1 npx vitest run src/lib/live.test.ts   # echte Routensuche gegen brouter.d
 npm run build                               # Produktions-Build nach dist/ (PWA, offline-fähig)
 ```
 
-## Online (Cloudflare Pages)
+## Online (GitHub Pages)
 
-Die App läuft unter **https://outdoorwild-navigator.pages.dev**. Cloudflare baut jeden Push auf `main` automatisch, das Repo bleibt dabei privat.
+Bei jedem Push auf `main` testet und baut [deploy.yml](.github/workflows/deploy.yml) die App und veröffentlicht sie unter **https://kubana90.github.io/outdoorwild-navigator/**.
+Voraussetzung: Das Repo ist öffentlich, und unter Settings → Pages steht Source auf „GitHub Actions“.
+
+## Alternative: Cloudflare Pages (Repo bleibt privat)
+
+Dann läuft die App unter **https://outdoorwild-navigator.pages.dev**. Cloudflare baut jeden Push auf `main` automatisch, das Repo bleibt dabei privat.
 
 Einstellungen im Cloudflare-Projekt:
 
