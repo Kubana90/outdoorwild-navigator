@@ -232,6 +232,16 @@ export class Navigator {
   }
 }
 
+/** Where a detour back onto the route aims: a little ahead of the nearest point, never behind. */
+export function rejoinTarget(route: RawRoute, along: number, lead = 150): LonLat {
+  return pointAt(route.coords, route.cum, Math.min(route.length, along + lead))
+}
+
+/** Seconds off the track before the app computes a way back. */
+export const REROUTE_AFTER_MS = 8000
+/** Minimum pause between two detour computations. */
+export const REROUTE_EVERY_MS = 30000
+
 /** Latest start time so that you arrive `margin` minutes before sunset. */
 export function latestStart(pos: LonLat, durationMin: number, day = new Date(), margin = 30): Date | null {
   const t = SunCalc.getTimes(day, pos[1], pos[0]).sunset

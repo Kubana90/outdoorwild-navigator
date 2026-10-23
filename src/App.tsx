@@ -6,6 +6,7 @@ import { analyzeRoute, characterTags, describeRoute, km } from './lib/analysis'
 import { searchPlaces, type Place } from './lib/geocode'
 import type { LonLat } from './lib/geo'
 import { download, fromGpx, toGpx } from './lib/gpx'
+import { primeSpeech, requestCompassPermission } from './lib/device'
 import type { Fix } from './lib/nav'
 import { deleteSaved, loadSaved, prefetchCorridor, saveRoute, type SavedRoute } from './lib/offline'
 import { planLoops, planPointToPoint, type PlannedRoute } from './lib/planner'
@@ -63,6 +64,7 @@ export default function App() {
 
   const [navRoute, setNavRoute] = useState<PlannedRoute | null>(null)
   const [fix, setFix] = useState<Fix | null>(null)
+  const [detour, setDetour] = useState<LonLat[] | null>(null)
   const [follow, setFollow] = useState(true)
   const [headingUp, setHeadingUp] = useState(true)
   const [sheetOpen, setSheetOpen] = useState(true)
@@ -216,6 +218,8 @@ export default function App() {
         fitKey={fitKey}
         onMapClick={onMapClick}
         onSelect={setSelectedId}
+        detour={detour}
+        onUserPan={() => setFollow(false)}
       />
 
       <div className="layers">
@@ -234,9 +238,11 @@ export default function App() {
         <NavigationView
           route={navRoute}
           onFix={setFix}
+          onDetour={setDetour}
           onExit={() => {
             setNavRoute(null)
             setFix(null)
+            setDetour(null)
           }}
           headingUp={headingUp}
           onToggleHeadingUp={() => setHeadingUp((h) => !h)}
@@ -423,7 +429,10 @@ export default function App() {
             <RouteDetails
               route={selected}
               onHover={setHoverAlong}
-              onNavigate={() => {
+              onNavigate={async () => {
+                // both need a tap on iPhones; the tap is this button
+                primeSpeech()
+                await requestCompassPermission()
                 setNavRoute(selected)
                 setFollow(true)
               }}

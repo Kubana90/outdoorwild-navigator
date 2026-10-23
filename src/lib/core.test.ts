@@ -164,6 +164,29 @@ describe('navigation', () => {
   })
 })
 
+describe('detour and track', () => {
+  it('aims the way back a little ahead on the route, never past its end', async () => {
+    const { rejoinTarget } = await import('./nav')
+    const r = lineRoute([{}, {}])
+    expect(distance(rejoinTarget(r, 500), pointAt(r.coords, r.cum, 650))).toBeLessThan(2)
+    expect(distance(rejoinTarget(r, r.length - 20), r.coords[r.coords.length - 1])).toBeLessThan(2)
+  })
+
+  it('writes a recorded track as GPX with timestamps', async () => {
+    const { trackToGpx } = await import('./gpx')
+    const gpx = trackToGpx(
+      [
+        { pos: [9.2, 49.5], time: Date.parse('2026-10-24T09:00:00Z'), accuracy: 5 },
+        { pos: [9.201, 49.5], time: Date.parse('2026-10-24T09:00:10Z'), accuracy: 5 },
+      ],
+      'Runde <Test>',
+    )
+    expect(gpx).toContain('<name>Runde &lt;Test&gt;</name>')
+    expect(gpx.match(/<trkpt /g)).toHaveLength(2)
+    expect(gpx).toContain('<time>2026-10-24T09:00:10.000Z</time>')
+  })
+})
+
 describe('brouter parsing', () => {
   it('reads coordinates, way segments and voice hints', () => {
     const json = {

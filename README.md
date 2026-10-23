@@ -43,7 +43,7 @@ Einstellungen im Cloudflare-Projekt:
 | Routing | `src/lib/brouter.ts` | lädt das Profil auf den BRouter-Server und holt Routen (mit Wiederholung, wenn der Server bremst) |
 | Routensuche | `src/lib/planner.ts` | A→B mit bis zu 4 Varianten, Rundtouren in 3 Richtungen, sortiert nach Wildnis-Score |
 | Analyse | `src/lib/analysis.ts` | Wildnis-Score, Wegearten, Untergrund, Anstiege, Zeit, Schwierigkeit, Beschreibungstext |
-| Navigation | `src/lib/nav.ts` | Fortschritt, Abbiegehinweise mit Wegeart, Weg-verlassen-Erkennung, Pfad-Kompass, Anstiegs-Vorschau, Tageslicht |
+| Navigation | `src/lib/nav.ts`, `src/components/NavigationView.tsx` | Fortschritt, Abbiegehinweise mit Wegeart, Weg-verlassen-Erkennung, automatischer Rückweg zum Pfad (nach 8 s abseits), Pfad-Kompass, Anstiegs-Vorschau, Tageslicht, GPS-Ausfall-Warnung, Track-Aufzeichnung als GPX |
 | Offline | `src/lib/offline.ts`, `public/sw.js` | gemerkte Touren, Karten entlang der Route vorladen, Kachel-Cache |
 | Region | `src/lib/region.ts` | Neckar-Odenwald-Kreis: Kartenausschnitt, Startorte, Suchbereich |
 

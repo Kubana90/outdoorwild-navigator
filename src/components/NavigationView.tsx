@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { km, WAY_COLOR, WAY_LABEL } from '../lib/analysis'
-import { bearing, compassWord, destination, pointAt, angleDiff } from '../lib/geo'
-import { clock, Navigator, type Fix, type NavState } from '../lib/nav'
+import { analyzeRoute, km, WAY_COLOR, WAY_LABEL } from '../lib/analysis'
+import { fetchRoute, type RawRoute } from '../lib/brouter'
+import { bearing, compassWord, destination, distance, pointAt, angleDiff, type LonLat } from '../lib/geo'
+import { download, trackToGpx, type TrackPoint } from '../lib/gpx'
+import { clock, Navigator, rejoinTarget, REROUTE_AFTER_MS, REROUTE_EVERY_MS, type Fix, type NavState } from '../lib/nav'
 import type { PlannedRoute } from '../lib/planner'
 import { isBikeActivity } from '../lib/profile'
 import { ElevationChart } from './ElevationChart'
@@ -9,12 +11,23 @@ import { ElevationChart } from './ElevationChart'
 interface Props {
   route: PlannedRoute
   onFix: (fix: Fix | null) => void
+  onDetour: (line: LonLat[] | null) => void
   onExit: () => void
   headingUp: boolean
   onToggleHeadingUp: () => void
   follow: boolean
   onFollow: () => void
 }
+
+/** The computed way back onto the planned route. */
+interface Detour {
+  raw: RawRoute
+  nav: Navigator
+  state: NavState | null
+}
+
+const GPS_STALE_MS = 20000
+const TRACK_KEY = 'owild-track'
 
 function speak(text: string, enabled: boolean) {
   if (!enabled || !('speechSynthesis' in window)) return
@@ -28,6 +41,8 @@ function speak(text: string, enabled: boolean) {
 const vibrate = (pattern: number[]) => navigator.vibrate?.(pattern)
 
 const span = (min: number) => (min >= 90 ? `${Math.round(min / 60)} h` : `${Math.round(min)} min`)
+
+const metres = (m: number) => (m < 1000 ? `${Math.round(m / 10) * 10} m` : km(m))
 
 /** Compass heading from the device, if it has one. */
 function useCompass(): number | null {
@@ -47,7 +62,17 @@ function useCompass(): number | null {
   return h
 }
 
-export function NavigationView({ route, onFix, onExit, headingUp, onToggleHeadingUp, follow, onFollow }: Props) {
+/** Ticks every few seconds so the view notices a silent GPS. */
+function useNow(everyMs: number): number {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), everyMs)
+    return () => clearInterval(t)
+  }, [everyMs])
+  return now
+}
+
+export function NavigationView({ route, onFix, onDetour, onExit, headingUp, onToggleHeadingUp, follow, onFollow }: Props) {
   const navigator_ = useMemo(() => new Navigator(route.raw, route.analysis), [route])
   const [state, setState] = useState<NavState | null>(null)
   const [fix, setFix] = useState<Fix | null>(null)
@@ -55,17 +80,30 @@ export function NavigationView({ route, onFix, onExit, headingUp, onToggleHeadin
   const [sim, setSim] = useState(false)
   const [simSpeed, setSimSpeed] = useState(5)
   const [gpsError, setGpsError] = useState<string | null>(null)
+  const [detour, setDetour] = useState<Detour | null>(null)
+  const [rerouting, setRerouting] = useState(false)
+  const [trackLength, setTrackLength] = useState(0)
   const compass = useCompass()
+  const now = useNow(5000)
   const announced = useRef(new Set<string>())
   const wasOff = useRef(false)
   const deviate = useRef(0)
+  const offSince = useRef<number | null>(null)
+  const rerouteAt = useRef(0)
+  const rerouteAbort = useRef<AbortController | null>(null)
+  const track = useRef<TrackPoint[]>([])
   const bike = isBikeActivity(route.options.activity)
 
   // keep the screen on while navigating
   useEffect(() => {
     let lock: WakeLockSentinel | null = null
-    navigator.wakeLock?.request('screen').then((l) => (lock = l)).catch(() => {})
+    const request = () => navigator.wakeLock?.request('screen').then((l) => (lock = l)).catch(() => {})
+    request()
+    // the lock is released when the app goes to the background: take it again
+    const onVisible = () => document.visibilityState === 'visible' && request()
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
+      document.removeEventListener('visibilitychange', onVisible)
       lock?.release().catch(() => {})
     }
   }, [])
@@ -114,6 +152,25 @@ export function NavigationView({ route, onFix, onExit, headingUp, onToggleHeadin
     return () => clearInterval(t)
   }, [sim, simSpeed])
 
+  // computes a way from the current position back onto the route
+  const reroute = (f: Fix, along: number) => {
+    rerouteAt.current = f.time
+    rerouteAbort.current?.abort()
+    const ctrl = new AbortController()
+    rerouteAbort.current = ctrl
+    setRerouting(true)
+    fetchRoute([f.pos, rejoinTarget(route.raw, along)], route.options, 0, ctrl.signal)
+      .then((raw) => {
+        if (ctrl.signal.aborted || raw.length < 15) return
+        setDetour({ raw, nav: new Navigator(raw, analyzeRoute(raw, route.options.activity)), state: null })
+        onDetour(raw.coords)
+        vibrate([80, 60, 80])
+        speak(`Rückweg berechnet: ${metres(raw.length)} bis zum Pfad.`, voice)
+      })
+      .catch(() => {})
+      .finally(() => !ctrl.signal.aborted && setRerouting(false))
+  }
+
   // feed the navigator
   useEffect(() => {
     if (!fix) return
@@ -123,9 +180,51 @@ export function NavigationView({ route, onFix, onExit, headingUp, onToggleHeadin
     const s = navigator_.update(f)
     if (import.meta.env.DEV) Object.assign(window, { __owildNav: { fix: f, state: s } })
     setState(s)
+
+    // track recording: a point every few metres, saved so a reload keeps it
+    const last = track.current[track.current.length - 1]
+    if (!last || distance(last.pos, f.pos) >= 3) {
+      track.current.push({ pos: f.pos, time: f.time, accuracy: f.accuracy })
+      setTrackLength((len) => len + (last ? distance(last.pos, f.pos) : 0))
+      if (track.current.length % 20 === 0) {
+        try {
+          localStorage.setItem(TRACK_KEY, JSON.stringify({ name: route.title, points: track.current }))
+        } catch {
+          // storage full: the in-memory track still works
+        }
+      }
+    }
+
+    // detour handling
+    if (!s.offTrack) {
+      offSince.current = null
+      if (detour) {
+        rerouteAbort.current?.abort()
+        setDetour(null)
+        onDetour(null)
+      }
+      return
+    }
+    offSince.current ??= f.time
+    const mayReroute = f.time - rerouteAt.current >= REROUTE_EVERY_MS
+    if (detour) {
+      const ds = detour.nav.update(f)
+      setDetour({ ...detour, state: ds })
+      // strayed from the detour as well: compute a fresh one
+      if (ds.offTrack && mayReroute) reroute(f, s.along)
+    } else if (f.time - offSince.current >= REROUTE_AFTER_MS && s.guideDistance > 50 && mayReroute) {
+      reroute(f, s.along)
+    }
   }, [fix])
 
-  useEffect(() => () => onFix(null), [])
+  useEffect(
+    () => () => {
+      onFix(null)
+      onDetour(null)
+      rerouteAbort.current?.abort()
+    },
+    [],
+  )
 
   // announcements
   useEffect(() => {
@@ -143,7 +242,8 @@ export function NavigationView({ route, onFix, onExit, headingUp, onToggleHeadin
 
     const h = state.nextHint
     if (h) {
-      const far = bike ? 250 : 120
+      // faster riders hear the first call earlier: about 25 s before the turn
+      const far = Math.max(bike ? 250 : 120, (fix?.speed ?? 0) * 25)
       const near = bike ? 40 : 20
       const left = h.angle < 0
       if (h.distance <= far && h.distance > near * 2 && !a.has(`f${h.index}`)) {
@@ -175,38 +275,93 @@ export function NavigationView({ route, onFix, onExit, headingUp, onToggleHeadin
     }
   }, [state])
 
+  // detour turn announcements
+  useEffect(() => {
+    const h = detour?.state?.nextHint
+    if (!h || !state?.offTrack) return
+    const near = bike ? 40 : 20
+    if (h.distance <= near && !announced.current.has(`d${detour!.raw.length}-${h.index}`)) {
+      announced.current.add(`d${detour!.raw.length}-${h.index}`)
+      vibrate(h.angle < 0 ? [120, 80, 120] : [450])
+      speak(h.text, voice)
+    }
+  }, [detour])
+
+  // GPS gone quiet?
+  const gpsStale = !sim && !!fix && now - fix.time > GPS_STALE_MS
+  useEffect(() => {
+    if (gpsStale && !announced.current.has('stale')) {
+      announced.current.add('stale')
+      vibrate([300])
+      speak('GPS-Signal verloren. Die Anzeige wird nicht mehr aktualisiert.', voice)
+    }
+    if (!gpsStale) announced.current.delete('stale')
+  }, [gpsStale])
+
+  const saveTrack = () => {
+    const name = `${route.title} ${new Date().toLocaleDateString('de-DE')}`
+    download(`${name.replace(/\W+/g, '_')}_Track.gpx`, trackToGpx(track.current, name))
+  }
+
   const heading = fix?.heading ?? compass
   // arrow rotation: relative to where the user looks (or north if unknown)
   const arrow = state ? (heading !== null ? angleDiff(heading, state.guideBearing) : state.guideBearing) : 0
   const daylightClass = state?.daylightBuffer == null ? '' : state.daylightBuffer < 0 ? 'bad' : state.daylightBuffer < 45 ? 'warn' : 'ok'
+  const detourHint = state?.offTrack && detour?.state ? detour.state : null
+  // a silent GPS outranks every instruction: the instruction would be stale too
+  const topClass = gpsStale ? 'stale' : state?.offTrack ? (detourHint ? 'detour' : 'off') : ''
 
   return (
     <div className="nav">
-      <div className={`nav-top ${state?.offTrack ? 'off' : ''}`}>
+      <div className={`nav-top ${topClass}`}>
         {!state && <div className="nav-wait">{gpsError ?? 'Suche GPS-Signal …'}</div>}
-        {state?.offTrack && (
+        {state && gpsStale && (
+          <div className="nav-wait">Kein GPS-Signal seit {Math.round((now - fix!.time) / 1000)} s – freie Sicht zum Himmel suchen</div>
+        )}
+        {!gpsStale && detourHint && (
+          <div className="nav-hint">
+            <div
+              className="hint-arrow"
+              style={{ transform: `rotate(${detourHint.nextHint ? Math.max(-150, Math.min(150, detourHint.nextHint.angle)) : angleDiff(heading ?? 0, detourHint.guideBearing)}deg)` }}
+            >
+              ⬆
+            </div>
+            <div>
+              <div className="hint-dist">{detourHint.nextHint ? metres(detourHint.nextHint.distance) : metres(detourHint.remaining)}</div>
+              <div className="hint-text">
+                Rückweg: {detourHint.nextHint ? detourHint.nextHint.text : 'dem Rückweg folgen'} · noch {metres(detourHint.remaining)} bis zum Pfad
+              </div>
+            </div>
+          </div>
+        )}
+        {!gpsStale && state?.offTrack && !detourHint && (
           <div className="nav-hint">
             <div className="hint-arrow" style={{ transform: `rotate(${arrow}deg)` }}>
               ⬆
             </div>
             <div>
               <div className="hint-dist">{Math.round(state.guideDistance)} m</div>
-              <div className="hint-text">Weg verlassen, zurück Richtung {compassWord(state.guideBearing)}</div>
+              <div className="hint-text">
+                Weg verlassen, zurück Richtung {compassWord(state.guideBearing)}
+                {rerouting ? ' · Rückweg wird berechnet …' : ''}
+              </div>
             </div>
           </div>
         )}
-        {state && !state.offTrack && state.nextHint && (
+        {state && !state.offTrack && !gpsStale && state.nextHint && (
           <div className="nav-hint">
             <div className="hint-arrow" style={{ transform: `rotate(${Math.max(-150, Math.min(150, state.nextHint.angle))}deg)` }}>
               ⬆
             </div>
             <div>
-              <div className="hint-dist">{state.nextHint.distance < 1000 ? `${Math.round(state.nextHint.distance / 10) * 10} m` : km(state.nextHint.distance)}</div>
+              <div className="hint-dist">{metres(state.nextHint.distance)}</div>
               <div className="hint-text">{state.nextHint.text}</div>
             </div>
           </div>
         )}
-        {state && !state.offTrack && !state.nextHint && <div className="nav-wait">{state.finished ? 'Ziel erreicht' : 'Dem Weg bis zum Ziel folgen'}</div>}
+        {state && !state.offTrack && !gpsStale && !state.nextHint && (
+          <div className="nav-wait">{state.finished ? 'Ziel erreicht' : 'Dem Weg bis zum Ziel folgen'}</div>
+        )}
       </div>
 
       <div className="nav-side">
@@ -239,6 +394,10 @@ export function NavigationView({ route, onFix, onExit, headingUp, onToggleHeadin
             </div>
             <div className="ahead-scale">
               <span>jetzt</span>
+              <span className={fix && fix.accuracy > 30 ? 'warn' : ''}>
+                {fix ? `GPS ±${Math.round(fix.accuracy)} m` : ''}
+                {trackLength > 50 ? ` · Track ${km(trackLength)}` : ''}
+              </span>
               <span>1,5 km voraus</span>
             </div>
             <div className="nav-stats">
@@ -277,13 +436,14 @@ export function NavigationView({ route, onFix, onExit, headingUp, onToggleHeadin
         <div className="nav-buttons">
           <button onClick={onExit}>✕ Beenden</button>
           <button onClick={() => setVoice((v) => !v)}>{voice ? '🔊 Ansagen an' : '🔇 Ansagen aus'}</button>
+          {track.current.length > 2 && <button onClick={saveTrack}>⤓ Track als GPX</button>}
           <button className={sim ? 'active' : ''} onClick={() => setSim((s) => !s)}>
             {sim ? '■ Simulation stoppen' : '▶ Tour simulieren'}
           </button>
           {sim && (
             <>
               <button onClick={() => setSimSpeed((s) => (s >= 20 ? 1 : s * 2))}>Tempo ×{simSpeed}</button>
-              <button onClick={() => (deviate.current = 8)}>Vom Weg abweichen</button>
+              <button onClick={() => (deviate.current = 25)}>Vom Weg abweichen</button>
             </>
           )}
         </div>
@@ -291,4 +451,3 @@ export function NavigationView({ route, onFix, onExit, headingUp, onToggleHeadin
     </div>
   )
 }
-

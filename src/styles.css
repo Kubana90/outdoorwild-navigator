@@ -555,6 +555,16 @@ input[type='range'] {
   background: var(--danger);
   animation: pulse 1.2s ease-in-out infinite;
 }
+.nav-top.detour {
+  background: #b25e0e;
+}
+.nav-top.stale {
+  background: #5d5d5d;
+}
+.ahead-scale .warn {
+  color: #c77700;
+  font-weight: 600;
+}
 @keyframes pulse {
   50% {
     box-shadow: 0 0 0 8px rgba(198, 40, 40, 0.3);

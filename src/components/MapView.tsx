@@ -55,6 +55,10 @@ interface Props {
   fitKey: string
   onMapClick: (pos: LonLat) => void
   onSelect: (id: string) => void
+  /** computed way back onto the route while navigating */
+  detour: LonLat[] | null
+  /** the user dragged the map: stop following the position */
+  onUserPan: () => void
 }
 
 const empty = { type: 'FeatureCollection' as const, features: [] }
@@ -104,6 +108,7 @@ export function MapView(p: Props) {
       else props.current.onMapClick([e.lngLat.lng, e.lngLat.lat])
     })
     m.on('style.load', () => ensureLayers(m))
+    m.on('dragstart', () => props.current.onUserPan())
     m.on('error', (e) => console.error('Karte:', e.error?.message ?? e))
     if (import.meta.env.DEV) Object.assign(window, { __owildMap: m })
     map.current = m
@@ -145,6 +150,9 @@ export function MapView(p: Props) {
           'circle-stroke-width': 2.5,
         },
       })
+      m.addSource('detour', { type: 'geojson', data: empty })
+      m.addLayer({ id: 'detour-casing', type: 'line', source: 'detour', paint: { 'line-color': '#ffffff', 'line-width': 8 }, layout: { 'line-cap': 'round', 'line-join': 'round' } })
+      m.addLayer({ id: 'detour-line', type: 'line', source: 'detour', paint: { 'line-color': '#e07b24', 'line-width': 5, 'line-dasharray': [1.5, 1.5] }, layout: { 'line-join': 'round' } })
       m.addSource('hover', { type: 'geojson', data: empty })
       m.addLayer({ id: 'hover', type: 'circle', source: 'hover', paint: { 'circle-radius': 7, 'circle-color': '#ff6f00', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } })
     }
@@ -166,6 +174,9 @@ export function MapView(p: Props) {
       type: 'FeatureCollection',
       features: cur.points.map((pt) => ({ type: 'Feature', properties: { role: pt.role }, geometry: { type: 'Point', coordinates: pt.pos } })),
     })
+    src('detour')?.setData(
+      cur.detour ? { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: cur.detour } }] } : empty,
+    )
     const hp = sel && cur.hoverAlong !== null ? pointAt(sel.raw.coords, sel.raw.cum, cur.hoverAlong) : null
     src('hover')?.setData(hp ? { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: hp } }] } : empty)
   }
@@ -196,7 +207,7 @@ export function MapView(p: Props) {
   useEffect(() => {
     const m = map.current
     if (m && m.getSource('cand')) syncData(m)
-  }, [p.candidates, p.selectedId, p.points, p.hoverAlong])
+  }, [p.candidates, p.selectedId, p.points, p.hoverAlong, p.detour])
 
   // fit to the candidates when a new search arrives
   useEffect(() => {
