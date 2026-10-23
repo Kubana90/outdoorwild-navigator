@@ -1,0 +1,5 @@
+# Cloudflare Pages: the service worker must always be fresh so updates arrive
+/sw.js
+  Cache-Control: no-cache
+/manifest.webmanifest
+  Cache-Control: no-cache

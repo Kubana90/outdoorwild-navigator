@@ -17,6 +17,19 @@ LIVE=1 npx vitest run src/lib/live.test.ts   # echte Routensuche gegen brouter.d
 npm run build                               # Produktions-Build nach dist/ (PWA, offline-fähig)
 ```
 
+## Online (Cloudflare Pages)
+
+Die App läuft unter **https://outdoorwild-navigator.pages.dev**. Cloudflare baut jeden Push auf `main` automatisch, das Repo bleibt dabei privat.
+
+Einstellungen im Cloudflare-Projekt:
+
+| Einstellung | Wert |
+| --- | --- |
+| Framework preset | Vite (oder None) |
+| Build command | `npm test && npm run build` |
+| Build output directory | `dist` |
+| Node-Version | über `.nvmrc` (22) |
+
 ## So funktioniert es
 
 | Teil | Datei | Was es tut |
