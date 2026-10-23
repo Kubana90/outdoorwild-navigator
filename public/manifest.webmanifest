@@ -1,0 +1,12 @@
+{
+  "name": "OutdoorWild Navigator",
+  "short_name": "OutdoorWild",
+  "description": "Routenplanung und Navigation abseits von Straßen: Waldwege, Pfade, Trails.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#13251a",
+  "theme_color": "#1f3d2b",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
