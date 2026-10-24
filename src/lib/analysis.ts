@@ -101,7 +101,10 @@ export interface RouteAnalysis {
   wayShare: Record<WayKind, number>
   surfaceShare: Record<SurfaceKind, number>
   /** metres on asphalt roads with traffic (minor + road) */
+  /** metres on roads with car traffic (Bundes-, Land-, Kreis-, Verbindungsstraßen) */
   roadMetres: number
+  /** metres on streets inside villages (residential, service) */
+  townMetres: number
   forestShare: number
   longestTrail: number
   steepestGrade: number
@@ -314,7 +317,8 @@ export function analyzeRoute(route: RawRoute, activity: Activity): RouteAnalysis
     wildScore,
     wayShare,
     surfaceShare,
-    roadMetres: (wayShare.minor + wayShare.road) * length,
+    roadMetres: wayShare.road * length,
+    townMetres: wayShare.minor * length,
     forestShare,
     longestTrail,
     steepestGrade,
@@ -368,9 +372,9 @@ export function describeRoute(a: RouteAnalysis, activity: Activity): string {
     `${wildLabel(a.wildScore)}: ${pct(natural)} der Strecke verlaufen auf Pfaden und Wald- oder Feldwegen` +
       (a.wayShare.trail > 0.05 ? `, davon ${pct(a.wayShare.trail)} auf schmalen Pfaden.` : '.'),
   )
-  if (a.roadMetres < 100) s.push('Straßen mit Verkehr werden praktisch nicht berührt.')
-  else if (a.roadMetres < a.length * 0.15) s.push(`Auf Straßen bist du nur ${km(a.roadMetres)} unterwegs.`)
-  else s.push(`Etwa ${km(a.roadMetres)} führen über Straßen.`)
+  const town = a.townMetres > 300 ? `, dazu ${km(a.townMetres)} durch Orte` : ''
+  if (a.roadMetres < 100) s.push(`Straßen mit Verkehr werden praktisch nicht berührt${town}.`)
+  else s.push(`Auf Straßen mit Verkehr bist du ${km(a.roadMetres)} unterwegs${town}.`)
 
   const surfaces = (Object.entries(a.surfaceShare) as [SurfaceKind, number][])
     .filter(([k, v]) => k !== 'unknown' && v > 0.12)

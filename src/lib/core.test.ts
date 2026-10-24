@@ -55,7 +55,10 @@ describe('analysis', () => {
     const tame = analyzeRoute(lineRoute([{ highway: 'tertiary' }, { highway: 'residential' }]), 'mtb')
     expect(wild.wildScore).toBeGreaterThan(70)
     expect(tame.wildScore).toBeLessThan(15)
-    expect(tame.roadMetres).toBeGreaterThan(1900)
+    // tertiary counts as a road with traffic, residential as a street in a village
+    expect(tame.roadMetres).toBeGreaterThan(900)
+    expect(tame.townMetres).toBeGreaterThan(900)
+    expect(describeRoute(tame, 'mtb')).toMatch(/Straßen mit Verkehr bist du 1,0 km unterwegs, dazu 1,0 km durch Orte/)
     expect(describeRoute(wild, 'mtb')).toMatch(/Pfaden/)
   })
 
