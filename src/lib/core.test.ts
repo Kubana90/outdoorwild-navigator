@@ -257,6 +257,46 @@ describe('emergency', () => {
   })
 })
 
+describe('time budget', () => {
+  it('turns hours into a length that the time estimate confirms', async () => {
+    const { lengthForMinutes, estimateMinutes } = await import('./analysis')
+    const len = lengthForMinutes('mtb', 120)
+    expect(len).toBeGreaterThan(15000)
+    expect(len).toBeLessThan(40000)
+    const mix = { trail: 0.25, forest: 0.45, farm: 0.15, cycleway: 0.05, minor: 0.1, road: 0 }
+    expect(estimateMinutes('mtb', mix, len, (len / 1000) * 18, (len / 1000) * 18)).toBeCloseTo(120, -1)
+    expect(lengthForMinutes('hiking', 120)).toBeLessThan(lengthForMinutes('mtb', 120))
+  })
+})
+
+describe('highlights', () => {
+  it('places POIs on the route with distance and side', async () => {
+    const { highlightsAlongRoute } = await import('./poi')
+    const r = lineRoute([{}, {}]) // runs north
+    const onRoute = pointAt(r.coords, r.cum, 800)
+    const pois = [
+      { kind: 'Aussichtspunkt' as const, name: 'Blick', pos: destination(onRoute, 90, 60) },
+      { kind: 'Quelle' as const, name: null, pos: destination(pointAt(r.coords, r.cum, 300), 270, 40) },
+      { kind: 'Gipfel' as const, name: 'Fern', pos: destination(onRoute, 90, 900) },
+    ]
+    const h = highlightsAlongRoute(r, pois)
+    expect(h.map((x) => x.kind)).toEqual(['Quelle', 'Aussichtspunkt'])
+    expect(h[0].side).toBe('links')
+    expect(h[1].side).toBe('rechts')
+    expect(h[1].along).toBeCloseTo(800, -1)
+  })
+})
+
+describe('voice', () => {
+  it('keeps only the place name', async () => {
+    const { parseVoiceDestination } = await import('./voice')
+    expect(parseVoiceDestination('Navigiere zum Katzenbuckel')).toBe('Katzenbuckel')
+    expect(parseVoiceDestination('bring mich bitte nach Mudau.')).toBe('Mudau')
+    expect(parseVoiceDestination('Ziel: Margarethenschlucht')).toBe('Margarethenschlucht')
+    expect(parseVoiceDestination('Eberstadter Tropfsteinhöhle')).toBe('Eberstadter Tropfsteinhöhle')
+  })
+})
+
 describe('brouter parsing', () => {
   it('reads coordinates, way segments and voice hints', () => {
     const json = {

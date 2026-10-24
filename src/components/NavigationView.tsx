@@ -8,10 +8,12 @@ import type { PlannedRoute } from '../lib/planner'
 import { isBikeActivity } from '../lib/profile'
 import { ElevationChart } from './ElevationChart'
 import { nearestRescue, type RescuePoint } from '../lib/emergency'
+import { highlightLabel, POI_ICON, type Highlight } from '../lib/poi'
 
 interface Props {
   route: PlannedRoute
   rescuePoints: RescuePoint[]
+  highlights: Highlight[]
   onSos: () => void
   onFix: (fix: Fix | null) => void
   onDetour: (line: LonLat[] | null) => void
@@ -75,7 +77,7 @@ function useNow(everyMs: number): number {
   return now
 }
 
-export function NavigationView({ route, rescuePoints, onSos, onFix, onDetour, onExit, headingUp, onToggleHeadingUp, follow, onFollow }: Props) {
+export function NavigationView({ route, rescuePoints, highlights, onSos, onFix, onDetour, onExit, headingUp, onToggleHeadingUp, follow, onFollow }: Props) {
   const navigator_ = useMemo(() => new Navigator(route.raw, route.analysis), [route])
   const [state, setState] = useState<NavState | null>(null)
   const [fix, setFix] = useState<Fix | null>(null)
@@ -271,6 +273,15 @@ export function NavigationView({ route, rescuePoints, onSos, onFix, onDetour, on
       a.add('dark')
       speak('Achtung, du erreichst das Ziel voraussichtlich erst bei Dunkelheit. Prüfe, ob du umkehren oder abkürzen solltest.', voice)
     }
+    const hl = highlights.find((x) => x.along > state.along && x.along - state.along <= 300)
+    if (hl) {
+      const key = `h${Math.round(hl.along)}`
+      if (!a.has(key)) {
+        a.add(key)
+        const where = hl.side === 'am Weg' ? 'direkt am Weg' : hl.side
+        speak(`In ${Math.round((hl.along - state.along) / 50) * 50} Metern: ${hl.kind}${hl.name ? ` ${hl.name}` : ''}, ${where}.`, voice)
+      }
+    }
     const t = state.turnaround
     if (t?.advice === 'umkehren' && !a.has('turn')) {
       a.add('turn')
@@ -318,6 +329,7 @@ export function NavigationView({ route, rescuePoints, onSos, onFix, onDetour, on
   const daylightClass = state?.daylightBuffer == null ? '' : state.daylightBuffer < 0 ? 'bad' : state.daylightBuffer < 45 ? 'warn' : 'ok'
   const detourHint = state?.offTrack && detour?.state ? detour.state : null
   const rescueNear = fix ? nearestRescue(fix.pos, rescuePoints) : null
+  const nextHighlight = state ? (highlights.find((x) => x.along > state.along - 30 && x.along - state.along <= 1500) ?? null) : null
   // a silent GPS outranks every instruction: the instruction would be stale too
   const topClass = gpsStale ? 'stale' : state?.offTrack ? (detourHint ? 'detour' : 'off') : ''
 
@@ -453,6 +465,12 @@ export function NavigationView({ route, rescuePoints, onSos, onFix, onDetour, on
                     ? ` Wer zum Start zurück will: spätestens ${clock(state.turnaround.latestTurn)} umkehren.`
                     : ''}
                 </div>
+              </div>
+            )}
+            {nextHighlight && (
+              <div className="poi-line">
+                {POI_ICON[nextHighlight.kind]} {highlightLabel(nextHighlight)} in {metres(nextHighlight.along - state.along)}
+                {nextHighlight.side !== 'am Weg' ? ` · ${nextHighlight.side}` : ''}
               </div>
             )}
             {rescueNear && (

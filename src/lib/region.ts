@@ -24,5 +24,27 @@ export const REGION_PLACES: { name: string; pos: LonLat; note: string }[] = [
   { name: 'Osterburken', pos: [9.4274, 49.4305], note: 'Kirnautal, Römerkastell' },
 ]
 
+/**
+ * Area to ask OpenStreetMap about for a route: the whole home region (one
+ * cached answer serves every route in it) when the route lies inside, else a
+ * box around the route.
+ */
+export function queryBbox(coords: LonLat[], pad = 0.03): [number, number, number, number] {
+  const [w, s, e, n] = REGION.bbox
+  const inside = coords.every((p) => p[0] >= w - 0.05 && p[0] <= e + 0.05 && p[1] >= s - 0.05 && p[1] <= n + 0.05)
+  if (inside) return [w - 0.05, s - 0.05, e + 0.05, n + 0.05]
+  let bw = Infinity
+  let bs = Infinity
+  let be = -Infinity
+  let bn = -Infinity
+  for (const [x, y] of coords) {
+    bw = Math.min(bw, x)
+    bs = Math.min(bs, y)
+    be = Math.max(be, x)
+    bn = Math.max(bn, y)
+  }
+  return [bw - pad, bs - pad, be + pad, bn + pad]
+}
+
 export const inRegion = (p: LonLat) =>
   p[0] >= REGION.bbox[0] - 0.15 && p[0] <= REGION.bbox[2] + 0.15 && p[1] >= REGION.bbox[1] - 0.1 && p[1] <= REGION.bbox[3] + 0.1

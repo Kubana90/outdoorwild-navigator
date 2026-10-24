@@ -893,6 +893,53 @@ input[type='range'] {
   padding: 6px 8px;
 }
 
+/* ---------- highlights ---------- */
+.highlights {
+  margin-top: 10px;
+  font-size: 13px;
+}
+.highlights ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.highlights li {
+  display: grid;
+  grid-template-columns: 52px 22px 1fr;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.highlights li:hover {
+  background: color-mix(in srgb, #00897b 12%, transparent);
+}
+.hl-km {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.hl-icon {
+  font-size: 15px;
+  text-align: center;
+}
+.hl-text small {
+  display: block;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.poi-line {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #00897b;
+  font-weight: 600;
+}
+.point-form button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 /* ---------- turnaround ---------- */
 .turn {
   margin-top: 8px;

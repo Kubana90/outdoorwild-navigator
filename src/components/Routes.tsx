@@ -3,6 +3,7 @@ import { clock, latestStart } from '../lib/nav'
 import type { PlannedRoute } from '../lib/planner'
 import { ElevationChart } from './ElevationChart'
 import { WeatherPanel } from './WeatherPanel'
+import { highlightLabel, POI_ICON, type Highlight } from '../lib/poi'
 
 export function WildRing({ score, size = 46 }: { score: number; size?: number }) {
   const r = size / 2 - 4
@@ -82,9 +83,11 @@ interface DetailProps {
   offlineProgress: string | null
   /** rescue points near the route, null while loading */
   rescueCount: number | null
+  /** natural highlights along the route, null while loading */
+  highlights: Highlight[] | null
 }
 
-export function RouteDetails({ route, onHover, onNavigate, onGpx, onSave, onOffline, offlineProgress, rescueCount }: DetailProps) {
+export function RouteDetails({ route, onHover, onNavigate, onGpx, onSave, onOffline, offlineProgress, rescueCount, highlights }: DetailProps) {
   const a = route.analysis
   const start = route.raw.coords[0]
   const latest = start ? latestStart(start, a.durationMin) : null
@@ -149,6 +152,25 @@ export function RouteDetails({ route, onHover, onNavigate, onGpx, onSave, onOffl
           ))}
         </div>
       </div>
+
+      {highlights && highlights.length > 0 && (
+        <section className="highlights">
+          <h4>Natur-Highlights am Weg</h4>
+          <ul>
+            {highlights.map((h, i) => (
+              <li key={i} onMouseEnter={() => onHover(h.along)} onMouseLeave={() => onHover(null)} onClick={() => onHover(h.along)}>
+                <span className="hl-km">km {(h.along / 1000).toFixed(1).replace('.', ',')}</span>
+                <span className="hl-icon">{POI_ICON[h.kind]}</span>
+                <span className="hl-text">
+                  {highlightLabel(h)}
+                  <small>{h.side === 'am Weg' ? 'direkt am Weg' : `${h.side}, ${Math.round(h.offset)} m abseits`}</small>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {highlights && highlights.length === 0 && <p className="muted small">Keine besonderen Natur-Punkte direkt am Weg eingetragen.</p>}
 
       <WeatherPanel route={route} />
 

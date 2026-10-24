@@ -390,3 +390,22 @@ export function describeRoute(a: RouteAnalysis, activity: Activity): string {
   if (a.maxDifficultyTag) s.push(`Schwierigste markierte Stelle: ${a.maxDifficultyTag}${bike ? ' (MTB-Skala)' : ' (SAC-Skala)'}.`)
   return s.join(' ')
 }
+
+/** Typical way mix of a wild loop in the region, for planning by time. */
+const PLANNING_MIX: Record<WayKind, number> = { trail: 0.25, forest: 0.45, farm: 0.15, cycleway: 0.05, minor: 0.1, road: 0 }
+
+/**
+ * Route length that takes about `minutes`, assuming the region's typical
+ * hilliness (`hmPerKm` metres of climb per km). Inverse of estimateMinutes.
+ */
+export function lengthForMinutes(activity: Activity, minutes: number, hmPerKm = 18): number {
+  let lo = 500
+  let hi = 200000
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2
+    const up = (mid / 1000) * hmPerKm
+    if (estimateMinutes(activity, PLANNING_MIX, mid, up, up) < minutes) lo = mid
+    else hi = mid
+  }
+  return Math.round((lo + hi) / 2 / 100) * 100
+}

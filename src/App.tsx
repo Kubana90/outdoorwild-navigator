@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { MapView, TOPO_TILES, flyTo, overlayTiles, type BaseMap, type MapPoint, type Overlay } from './components/MapView'
 import { EmergencySheet } from './components/EmergencySheet'
 import { NavigationView } from './components/NavigationView'
-import { bboxOf, fetchRescuePoints, rescueAlongRoute, type RescuePoint } from './lib/emergency'
+import { fetchRescuePoints, rescueAlongRoute, type RescuePoint } from './lib/emergency'
 import { PointInput, type RoutePoint } from './components/PointInput'
 import { RouteCard, RouteDetails } from './components/Routes'
-import { analyzeRoute, characterTags, describeRoute, km } from './lib/analysis'
+import { analyzeRoute, characterTags, describeRoute, km, lengthForMinutes } from './lib/analysis'
+import { fetchPois, highlightsAlongRoute, type Highlight } from './lib/poi'
 import { reverseGeocode } from './lib/geocode'
 import type { LonLat } from './lib/geo'
 import { download, fromGpx, toGpx } from './lib/gpx'
@@ -14,7 +15,7 @@ import type { Fix } from './lib/nav'
 import { deleteSaved, loadSaved, prefetchCorridor, saveRoute, type SavedRoute } from './lib/offline'
 import { planLoops, planPointToPoint, type PlannedRoute } from './lib/planner'
 import { isBikeActivity, type Activity } from './lib/profile'
-import { REGION, REGION_PLACES } from './lib/region'
+import { queryBbox, REGION, REGION_PLACES } from './lib/region'
 
 const ACTIVITIES: { id: Activity; label: string; icon: string }[] = [
   { id: 'mtb', label: 'MTB', icon: '🚵' },
@@ -60,6 +61,9 @@ export default function App() {
   /** which point the next map tap sets */
   const [target, setTarget] = useState<Target>('start')
   const [loopKm, setLoopKm] = useState(25)
+  /** plan the loop by distance or by the time you have */
+  const [loopBy, setLoopBy] = useState<'km' | 'time'>('time')
+  const [loopHours, setLoopHours] = useState(2)
   const [direction, setDirection] = useState<number | null>(null)
 
   const [candidates, setCandidates] = useState<PlannedRoute[]>([])
@@ -85,6 +89,7 @@ export default function App() {
   const [sheetOpen, setSheetOpen] = useState(true)
   const [sosOpen, setSosOpen] = useState(false)
   const [rescue, setRescue] = useState<{ routeId: string; all: RescuePoint[]; along: RescuePoint[] } | null>(null)
+  const [highlights, setHighlights] = useState<{ routeId: string; along: Highlight[] } | null>(null)
 
   const bike = isBikeActivity(activity)
   const selected = candidates.find((c) => c.id === selectedId) ?? null
@@ -95,17 +100,30 @@ export default function App() {
     if (!activeRoute || rescue?.routeId === activeRoute.id) return
     const ctrl = new AbortController()
     const coords = activeRoute.raw.coords
-    fetchRescuePoints(bboxOf(coords), ctrl.signal)
+    fetchRescuePoints(queryBbox(coords), ctrl.signal)
       .then((all) => setRescue({ routeId: activeRoute.id, all, along: rescueAlongRoute(coords, all) }))
       .catch(() => {})
     return () => ctrl.abort()
   }, [activeRoute?.id])
   const rescueHere = rescue && activeRoute && rescue.routeId === activeRoute.id ? rescue : null
+
+  // natural highlights next to the active route
+  useEffect(() => {
+    if (!activeRoute || highlights?.routeId === activeRoute.id) return
+    const ctrl = new AbortController()
+    fetchPois(queryBbox(activeRoute.raw.coords, 0.01), ctrl.signal)
+      .then((pois) => setHighlights({ routeId: activeRoute.id, along: highlightsAlongRoute(activeRoute.raw, pois) }))
+      .catch(() => {})
+    return () => ctrl.abort()
+  }, [activeRoute?.id])
+  const highlightsHere = highlights && activeRoute && highlights.routeId === activeRoute.id ? highlights.along : null
+
+  const loopLength = loopBy === 'time' ? lengthForMinutes(activity, loopHours * 60) : loopKm * 1000
   const options = { activity, wildness, maxDifficulty: bike ? mtbMax : sacMax, twoMetreRule: bike && twoMetreRule }
 
   useEffect(() => {
     if (candidates.length) setStale(true)
-  }, [activity, wildness, mtbMax, sacMax, twoMetreRule, loopKm, direction])
+  }, [activity, wildness, mtbMax, sacMax, twoMetreRule, loopKm, loopBy, loopHours, direction])
 
   useEffect(() => {
     setLoopKm((k) => (bike ? Math.max(k, 15) : Math.min(k, 15)))
@@ -185,7 +203,7 @@ export default function App() {
     try {
       const found =
         mode === 'loop'
-          ? await planLoops({ start: start.pos, length: loopKm * 1000, direction }, options, ctrl.signal)
+          ? await planLoops({ start: start.pos, length: loopLength, direction }, options, ctrl.signal)
           : await planPointToPoint([start.pos, ...vias, end!.pos], options, ctrl.signal)
       setCandidates(found)
       setSelectedId(found[0]?.id ?? null)
@@ -306,6 +324,7 @@ export default function App() {
         detour={detour}
         onUserPan={() => setFollow(false)}
         rescue={rescueHere?.along ?? []}
+        highlights={highlightsHere ?? []}
       />
 
       <div className="layers">
@@ -337,6 +356,7 @@ export default function App() {
         <NavigationView
           route={navRoute}
           rescuePoints={rescueHere?.all ?? []}
+          highlights={highlightsHere ?? []}
           onSos={() => setSosOpen(true)}
           onFix={setFix}
           onDetour={setDetour}
@@ -499,13 +519,40 @@ export default function App() {
 
           {mode === 'loop' && (
             <>
-              <label className="field">
-                <div className="field-head">
-                  <span>Länge der Runde</span>
-                  <b>{loopKm} km</b>
+              <div className="field inline">
+                <span>Runde planen nach</span>
+                <div className="seg small">
+                  <button className={loopBy === 'time' ? 'on' : ''} onClick={() => setLoopBy('time')}>
+                    ⏱ Zeit
+                  </button>
+                  <button className={loopBy === 'km' ? 'on' : ''} onClick={() => setLoopBy('km')}>
+                    📏 Kilometer
+                  </button>
                 </div>
-                <input type="range" min={bike ? 10 : 3} max={bike ? 100 : 40} step={1} value={loopKm} onChange={(e) => setLoopKm(Number(e.target.value))} />
-              </label>
+              </div>
+              {loopBy === 'time' ? (
+                <label className="field">
+                  <div className="field-head">
+                    <span>Ich habe Zeit für</span>
+                    <b>
+                      {loopHours % 1 === 0 ? loopHours : loopHours.toFixed(2).replace('.', ',').replace(/0$/, '')} h · ≈ {Math.round(loopLength / 1000)} km
+                    </b>
+                  </div>
+                  <input type="range" min={0.5} max={bike ? 8 : 6} step={0.25} value={loopHours} onChange={(e) => setLoopHours(Number(e.target.value))} />
+                  <div className="range-ends">
+                    <span>½ h</span>
+                    <span>mit Pausen rechnen · hügeliges Gelände</span>
+                  </div>
+                </label>
+              ) : (
+                <label className="field">
+                  <div className="field-head">
+                    <span>Länge der Runde</span>
+                    <b>{loopKm} km</b>
+                  </div>
+                  <input type="range" min={bike ? 10 : 3} max={bike ? 100 : 40} step={1} value={loopKm} onChange={(e) => setLoopKm(Number(e.target.value))} />
+                </label>
+              )}
               <div className="field inline">
                 <span>Richtung</span>
                 <div className="seg small">
@@ -555,6 +602,7 @@ export default function App() {
               onOffline={() => saveOffline(selected)}
               offlineProgress={offline}
               rescueCount={rescueHere ? rescueHere.along.length : null}
+              highlights={highlightsHere}
             />
           )}
 

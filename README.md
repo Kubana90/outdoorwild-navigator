@@ -44,6 +44,10 @@ Einstellungen im Cloudflare-Projekt:
 | Notfall | `src/lib/emergency.ts`, `src/components/EmergencySheet.tsx` | SOS-Knopf: 112 anrufen, Koordinaten für die Leitstelle, nächster Rettungspunkt (OSM `highway=emergency_access_point` über Overpass, 7 Tage zwischengespeichert), Standort an Kontakt teilen |
 | Wetter & Boden | `src/lib/weather.ts`, `src/components/WeatherPanel.tsx` | Matsch-Index aus Bodenfeuchte, Regen der letzten 48 h und Naturboden-Anteil; bestes Zeitfenster heute; Warnung bei Gewitter, Böen, Frost (Open-Meteo) |
 | Umkehr-Check | `src/lib/nav.ts` (`turnaroundCheck`) | Live beim Navigieren: Weiter vs. Umkehren mit Ankunftszeiten, spätester Umkehrzeitpunkt vor Dunkelheit, Ansage wenn nur Umkehren noch vor Dunkelheit reicht |
+| Natur-Highlights | `src/lib/poi.ts` | Aussichtspunkte, Gipfel, Quellen, Höhlen, Felsen, Schutzhütten, Burgen, Ruinen aus OSM; auf der Route verortet mit km-Stand und Seite; Ansage 300 m vorher |
+| Zeitbudget | `src/lib/analysis.ts` (`lengthForMinutes`) | „Ich habe 2 h“ → passende Rundenlänge aus Tempo und typischer Hügeligkeit (18 Hm/km) |
+| Sprachbefehl | `src/lib/voice.ts` | Mikrofon-Knopf an Start und Ziel: „Navigiere zum Katzenbuckel“ → Ortssuche, bester Treffer wird übernommen |
+| Overpass | `src/lib/overpass.ts`, `src/lib/region.ts` (`queryBbox`) | ein Zugriffspunkt mit Ersatz-Server; für Routen in der Heimatregion wird die ganze Region einmal geladen und 7 Tage gespeichert |
 | Start/Ziel-Eingabe | `src/components/PointInput.tsx` | Ortssuche (Nominatim), eigener Standort, Karte antippen mit Rückwärtssuche des Namens; „Zum Ziel navigieren“ plant ab dem aktuellen Standort und startet die Führung sofort |
 | Routensuche | `src/lib/planner.ts` | A→B mit bis zu 4 Varianten, Rundtouren in 3 Richtungen, sortiert nach Wildnis-Score |
 | Analyse | `src/lib/analysis.ts` | Wildnis-Score, Wegearten, Untergrund, Anstiege, Zeit, Schwierigkeit, Beschreibungstext |

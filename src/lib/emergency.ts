@@ -5,6 +5,7 @@
 // route, so the card also works without signal once a route was planned.
 
 import { bearing, compassWord, distance, type LonLat } from './geo'
+import { overpass } from './overpass'
 
 export interface RescuePoint {
   ref: string
@@ -18,7 +19,6 @@ export interface NearestRescue extends RescuePoint {
   bearing: number
 }
 
-const OVERPASS = 'https://overpass-api.de/api/interpreter'
 const CACHE_PREFIX = 'owild-rescue2:'
 const CACHE_DAYS = 7
 
@@ -48,11 +48,9 @@ export async function fetchRescuePoints(bbox: [number, number, number, number], 
     // no storage: fetch every time
   }
   const [w, s, e, n] = bbox
-  const query = `[out:json][timeout:25];node["highway"="emergency_access_point"](${s},${w},${n},${e});out;`
-  const res = await fetch(OVERPASS, { method: 'POST', body: new URLSearchParams({ data: query }), signal })
-  if (!res.ok) throw new Error('Rettungspunkte nicht erreichbar')
-  const json = (await res.json()) as { elements: { lat: number; lon: number; tags?: Record<string, string> }[] }
-  const points = json.elements
+  const query = `[out:json][timeout:30];node["highway"="emergency_access_point"](${s},${w},${n},${e});out;`
+  const elements = await overpass(query, signal)
+  const points = elements
     .filter((el) => el.tags?.ref)
     .map((el) => ({ ref: el.tags!.ref, pos: [el.lon, el.lat] as LonLat, note: el.tags!.description || el.tags!.name || undefined }))
   try {
