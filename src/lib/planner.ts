@@ -94,12 +94,13 @@ async function settle<T>(tasks: (() => Promise<T>)[], concurrency = 2): Promise<
 
 /** A→B (with optional vias): up to 3 alternatives at the chosen wildness plus a gentler one. */
 export async function planPointToPoint(points: LonLat[], options: ProfileOptions, signal?: AbortSignal): Promise<PlannedRoute[]> {
-  const gentle: ProfileOptions = { ...options, wildness: Math.max(0, options.wildness - 45) }
+  // one slightly more direct variant, but never one that takes to the roads
+  const gentle: ProfileOptions = { ...options, wildness: Math.max(40, options.wildness - 25) }
   const tasks: (() => Promise<PlannedRoute>)[] = [0, 1, 2].map(
     (alt) => async () => build(await fetchRoute(points, options, alt, signal), alt === 0 ? 'Hauptvorschlag' : `Alternative ${alt + 1}`, points, options),
   )
-  if (options.wildness >= 30) {
-    tasks.push(async () => build(await fetchRoute(points, gentle, 0, signal), 'Entspanntere Variante', points, gentle))
+  if (options.wildness >= 65) {
+    tasks.push(async () => build(await fetchRoute(points, gentle, 0, signal), 'Etwas direktere Variante', points, gentle))
   }
   const { ok: found, error } = await settle(tasks)
   if (!found.length) throw error ?? new Error('Keine Route gefunden. Setze Start und Ziel näher an Wege.')

@@ -342,6 +342,10 @@ input[type='range'] {
   border-radius: 999px;
   font-weight: 600;
 }
+.chip.warn {
+  background: #fdecea;
+  color: #8a1c1c;
+}
 .ring-bg {
   fill: none;
   stroke: var(--line);

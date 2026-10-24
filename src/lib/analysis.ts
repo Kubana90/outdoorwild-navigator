@@ -13,8 +13,8 @@ export const WAY_LABEL: Record<WayKind, string> = {
   forest: 'Wald- & Feldweg',
   farm: 'Wirtschaftsweg (befestigt)',
   cycleway: 'Radweg',
-  minor: 'Nebenstraße',
-  road: 'Straße',
+  minor: 'Ortsstraße',
+  road: 'Straße mit Verkehr',
 }
 
 export const WAY_COLOR: Record<WayKind, string> = {
@@ -48,8 +48,9 @@ const WILD_WEIGHT: Record<WayKind, number> = {
 export function wayKind(tags: Record<string, string>): WayKind {
   const hw = tags.highway ?? ''
   const paved = /^(asphalt|paved|concrete|paving_stones|sett|cobblestone)/.test(tags.surface ?? '')
-  if (/^(motorway|trunk|primary|secondary|tertiary)/.test(hw)) return 'road'
-  if (/^(unclassified|residential|living_street|service|pedestrian|road)$/.test(hw)) return 'minor'
+  // unclassified = connecting road between villages here, with car traffic
+  if (/^(motorway|trunk|primary|secondary|tertiary|unclassified)/.test(hw)) return 'road'
+  if (/^(residential|living_street|service|pedestrian|road)$/.test(hw)) return 'minor'
   if (hw === 'cycleway') return 'cycleway'
   if (hw === 'track') {
     if (tags.tracktype === 'grade1' || paved) return 'farm'
@@ -352,6 +353,7 @@ export function characterTags(a: RouteAnalysis, activity: Activity): string[] {
   if (a.roadMetres < 300) tags.push('Fast autofrei')
   if (a.length > 0 && a.ascent / (a.length / 1000) > 25) tags.push('Knackig')
   else if (a.length > 0 && a.ascent / (a.length / 1000) < 8) tags.push('Flach')
+  if (a.wayShare.road * a.length > 500) tags.push(`⚠ ${km(a.wayShare.road * a.length)} Straße`)
   if (a.surfaceShare.paved > 0.5) tags.push('Viel Asphalt')
   if (a.longestTrail > 3000) tags.push('Lange Naturpassage')
   return tags

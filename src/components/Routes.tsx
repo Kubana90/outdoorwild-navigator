@@ -63,7 +63,7 @@ export function RouteCard({ route, rank, selected, onSelect }: CardProps) {
         <WayBar share={a.wayShare} />
         <div className="chips">
           {route.tags.map((t) => (
-            <span className="chip" key={t}>
+            <span className={`chip ${t.startsWith('⚠') ? 'warn' : ''}`} key={t}>
               {t}
             </span>
           ))}

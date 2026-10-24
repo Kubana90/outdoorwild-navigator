@@ -20,7 +20,10 @@ export interface ProfileOptions {
 }
 
 type Category =
-  | 'majorRoad'
+  | 'trunk'
+  | 'primary'
+  | 'secondary'
+  | 'tertiary'
   | 'minorRoad'
   | 'cycleway'
   | 'trackPaved'
@@ -30,11 +33,21 @@ type Category =
   | 'footway'
   | 'steps'
 
-/** Cost factor per category at wildness 0 and at wildness 100. */
+/**
+ * Cost factor per category at wildness 0 and at wildness 100. A factor of
+ * 60 means the router would rather ride 60 m of track than 1 m of that
+ * road, so roads with traffic survive only as short, unavoidable links
+ * (through a village, across a bridge). `tertiary` also covers
+ * `unclassified`: in Germany those are the connecting roads between
+ * villages, with cars.
+ */
 const COSTS: Record<Activity, Record<Category, [number, number]>> = {
   mtb: {
-    majorRoad: [1.6, 12],
-    minorRoad: [1.2, 5],
+    trunk: [4, 200],
+    primary: [3, 90],
+    secondary: [2.2, 45],
+    tertiary: [1.6, 22],
+    minorRoad: [1.2, 6],
     cycleway: [1.0, 3.5],
     trackPaved: [1.1, 3],
     trackUnpaved: [1.3, 1.25],
@@ -44,8 +57,11 @@ const COSTS: Record<Activity, Record<Category, [number, number]>> = {
     steps: [30, 30],
   },
   gravel: {
-    majorRoad: [1.5, 10],
-    minorRoad: [1.1, 4],
+    trunk: [4, 200],
+    primary: [2.5, 80],
+    secondary: [1.8, 40],
+    tertiary: [1.3, 20],
+    minorRoad: [1.1, 5],
     cycleway: [1.0, 3],
     trackPaved: [1.0, 2.5],
     trackUnpaved: [1.2, 1.0],
@@ -55,8 +71,11 @@ const COSTS: Record<Activity, Record<Category, [number, number]>> = {
     steps: [10000, 10000],
   },
   hiking: {
-    majorRoad: [3, 15],
-    minorRoad: [1.4, 5],
+    trunk: [10000, 10000],
+    primary: [4, 120],
+    secondary: [3, 60],
+    tertiary: [2, 30],
+    minorRoad: [1.4, 6],
     cycleway: [1.5, 4],
     trackPaved: [1.2, 3],
     trackUnpaved: [1.1, 1.4],
@@ -66,8 +85,11 @@ const COSTS: Record<Activity, Record<Category, [number, number]>> = {
     steps: [1.5, 1.5],
   },
   trailrun: {
-    majorRoad: [3, 15],
-    minorRoad: [1.3, 5],
+    trunk: [10000, 10000],
+    primary: [4, 120],
+    secondary: [3, 60],
+    tertiary: [2, 30],
+    minorRoad: [1.3, 6],
     cycleway: [1.3, 4],
     trackPaved: [1.1, 3],
     trackUnpaved: [1.0, 1.3],
@@ -192,10 +214,15 @@ assign town_penalty =
   switch estimated_town_class=3 1.2
   switch estimated_town_class=4 1.3
   switch estimated_town_class=5 1.4 1.6
+assign hassidepath = or cycleway=track|lane or cycleway:right=track|lane or cycleway:left=track|lane cycleway:both=track|lane
 assign basecost =
-  if highway=motorway|motorway_link|trunk|trunk_link then ${bike ? c('majorRoad') : 10000}
-  else if highway=primary|primary_link|secondary|secondary_link|tertiary|tertiary_link then ${c('majorRoad')}
-  else if highway=unclassified|residential|living_street|service|pedestrian then ${c('minorRoad')}
+  if highway=motorway|motorway_link then 10000
+  else if highway=trunk|trunk_link then ${c('trunk')}
+  else if ( and ${bike ? 'true' : 'false'} and hassidepath highway=primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified ) then ${c('cycleway')}
+  else if highway=primary|primary_link then ${c('primary')}
+  else if highway=secondary|secondary_link then ${c('secondary')}
+  else if highway=tertiary|tertiary_link|unclassified then ${c('tertiary')}
+  else if highway=residential|living_street|service|pedestrian then ${c('minorRoad')}
   else if highway=cycleway then ${c('cycleway')}
   else if highway=steps then ${c('steps')}
   else if highway=track then

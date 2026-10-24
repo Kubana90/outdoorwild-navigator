@@ -80,10 +80,15 @@ describe('profile', () => {
   })
 
   it('makes roads more expensive as wildness rises', () => {
-    const cost = (p: string) => Number(/primary_link\|secondary\|secondary_link\|tertiary\|tertiary_link then (\S+)/.exec(p)![1])
+    const cost = (p: string, hw: string) => Number(new RegExp(`highway=${hw} then (\\S+)`).exec(p)![1])
     const tame = generateProfile({ activity: 'mtb', wildness: 0, maxDifficulty: 2 })
     const wild = generateProfile({ activity: 'mtb', wildness: 100, maxDifficulty: 2 })
-    expect(cost(wild)).toBeGreaterThan(cost(tame) * 5)
+    const usual = generateProfile({ activity: 'mtb', wildness: 70, maxDifficulty: 2 })
+    expect(cost(wild, 'primary\\|primary_link')).toBeGreaterThan(cost(tame, 'primary\\|primary_link') * 20)
+    // at the default setting a road with traffic costs far more than a track
+    expect(cost(usual, 'primary\\|primary_link')).toBeGreaterThan(50)
+    expect(cost(usual, 'tertiary\\|tertiary_link\\|unclassified')).toBeGreaterThan(12)
+    expect(wayKind({ highway: 'unclassified' })).toBe('road')
     expect(wild).toContain('validForBikes')
     expect(generateProfile({ activity: 'hiking', wildness: 50, maxDifficulty: 3 })).toContain('validForFoot')
   })
