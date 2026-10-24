@@ -3,7 +3,9 @@
 // system dialog the person confirms. What we can do is ask at the right
 // moment, in the right order, and show what is on and how to fix a "no".
 
-export type PermissionKey = 'location' | 'compass' | 'microphone' | 'storage'
+import { isNative, openAppSettings, platform } from './native'
+
+export type PermissionKey = 'location' | 'compass' | 'microphone' | 'notifications' | 'storage'
 export type PermissionStatus = 'granted' | 'denied' | 'prompt' | 'unsupported'
 
 export interface PermissionInfo {
@@ -13,12 +15,66 @@ export interface PermissionInfo {
   required: boolean
 }
 
-export const PERMISSIONS: PermissionInfo[] = [
+const ALL: PermissionInfo[] = [
   { key: 'location', title: 'Standort (genau)', why: 'Navigation, eigener Standort als Start, SOS-Koordinaten', required: true },
+  {
+    key: 'notifications',
+    title: 'Benachrichtigungen',
+    why: 'Navigation läuft bei ausgeschaltetem Bildschirm weiter und zeigt das als Hinweis an',
+    required: false,
+  },
   { key: 'compass', title: 'Kompass / Bewegung', why: 'Pfad-Kompass und Karte in Blickrichtung', required: false },
   { key: 'microphone', title: 'Mikrofon', why: 'Ziel per Sprache ansagen („Navigiere zum Katzenbuckel“)', required: false },
   { key: 'storage', title: 'Dauerhafter Speicher', why: 'Offline-Karten und gemerkte Touren werden nicht automatisch gelöscht', required: false },
 ]
+
+/** What this platform needs: notifications only natively, storage only in the browser. */
+export const PERMISSIONS: PermissionInfo[] = ALL.filter((p) => (isNative() ? p.key !== 'storage' : p.key !== 'notifications'))
+
+const nativeState = (s: string): PermissionStatus => (s === 'granted' ? 'granted' : s === 'denied' ? 'denied' : 'prompt')
+
+async function readNative(key: PermissionKey): Promise<PermissionStatus | null> {
+  switch (key) {
+    case 'location': {
+      const { Geolocation } = await import('@capacitor/geolocation')
+      return nativeState((await Geolocation.checkPermissions()).location)
+    }
+    case 'notifications': {
+      const { LocalNotifications } = await import('@capacitor/local-notifications')
+      return nativeState((await LocalNotifications.checkPermissions()).display)
+    }
+    case 'microphone': {
+      const { SpeechRecognition } = await import('@capacitor-community/speech-recognition')
+      return nativeState((await SpeechRecognition.checkPermissions()).speechRecognition)
+    }
+    case 'compass':
+      // Android: no permission; iOS WebView: same request as in Safari
+      return platform() === 'android' ? 'granted' : null
+    default:
+      return 'unsupported'
+  }
+}
+
+async function requestNative(key: PermissionKey): Promise<PermissionStatus | null> {
+  switch (key) {
+    case 'location': {
+      const { Geolocation } = await import('@capacitor/geolocation')
+      return nativeState((await Geolocation.requestPermissions({ permissions: ['location'] })).location)
+    }
+    case 'notifications': {
+      const { LocalNotifications } = await import('@capacitor/local-notifications')
+      return nativeState((await LocalNotifications.requestPermissions()).display)
+    }
+    case 'microphone': {
+      const { SpeechRecognition } = await import('@capacitor-community/speech-recognition')
+      return nativeState((await SpeechRecognition.requestPermissions()).speechRecognition)
+    }
+    case 'compass':
+      return platform() === 'android' ? 'granted' : null
+    default:
+      return 'unsupported'
+  }
+}
 
 const DONE_KEY = 'owild-setup-done'
 
@@ -38,7 +94,13 @@ async function queryState(name: string): Promise<PermissionStatus | null> {
 
 /** Current state without asking anything. */
 export async function readStatus(key: PermissionKey): Promise<PermissionStatus> {
+  if (isNative()) {
+    const s = await readNative(key).catch(() => null)
+    if (s) return s
+  }
   switch (key) {
+    case 'notifications':
+      return 'unsupported'
     case 'location':
       if (!('geolocation' in navigator)) return 'unsupported'
       return (await queryState('geolocation')) ?? 'prompt'
@@ -59,8 +121,15 @@ export async function readStatus(key: PermissionKey): Promise<PermissionStatus> 
 
 /** Asks for one permission; resolves with the result, never throws. */
 export async function request(key: PermissionKey): Promise<PermissionStatus> {
+  // the compass takes the web path everywhere: on iOS it must start inside the tap
+  if (isNative() && key !== 'compass') {
+    const s = await requestNative(key).catch(() => 'denied' as PermissionStatus)
+    if (s) return s
+  }
   try {
     switch (key) {
+      case 'notifications':
+        return 'unsupported'
       case 'compass': {
         if (!compassNeedsPermission()) return 'granted'
         const D = window.DeviceOrientationEvent as unknown as OrientationCtor
@@ -104,7 +173,9 @@ export async function requestAll(onEach: (key: PermissionKey, status: Permission
   // started before any await, so iOS still counts it as part of the tap
   const compass = request('compass')
   onEach('compass', await compass)
-  const order: PermissionKey[] = ['location', 'microphone', 'storage']
+  const order: PermissionKey[] = ['location', 'notifications', 'microphone', 'storage'].filter((k) =>
+    PERMISSIONS.some((p) => p.key === k),
+  ) as PermissionKey[]
   for (const key of order) {
     const before = await readStatus(key).catch(() => 'prompt' as PermissionStatus)
     if (before === 'granted' || before === 'unsupported') {
@@ -118,6 +189,10 @@ export async function requestAll(onEach: (key: PermissionKey, status: Permission
 /** Where to switch a denied permission back on, for this phone. */
 export function fixHint(key: PermissionKey): string {
   if (key === 'storage') return 'Wird vom Browser automatisch gewährt, sobald die App installiert und öfter genutzt wird.'
+  if (isNative())
+    return platform() === 'ios'
+      ? 'Unten auf „App-Einstellungen öffnen“ tippen und die Berechtigung dort einschalten.'
+      : 'Unten auf „App-Einstellungen öffnen“ tippen → Berechtigungen → erlauben (Standort: „Nur während der Nutzung“ und „Genauen Standort verwenden“).'
   if (isIos()) {
     if (key === 'location') return 'iPhone: Einstellungen → Datenschutz → Ortungsdienste → Safari-Websites → „Beim Verwenden“ und „Genauer Standort“ an.'
     if (key === 'compass') return 'iPhone: App schließen und neu öffnen, dann erneut „Alles erlauben“ tippen.'
@@ -125,6 +200,8 @@ export function fixHint(key: PermissionKey): string {
   }
   return 'Android: App lange antippen → App-Info → Berechtigungen, oder in Chrome: Schloss-Symbol neben der Adresse → Berechtigungen → erlauben.'
 }
+
+export { openAppSettings }
 
 export const setupDone = () => {
   try {

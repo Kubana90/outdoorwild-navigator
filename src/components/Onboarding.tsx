@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { fixHint, markSetupDone, PERMISSIONS, readStatus, requestAll, type PermissionKey, type PermissionStatus } from '../lib/permissions'
+import { fixHint, markSetupDone, openAppSettings, PERMISSIONS, readStatus, requestAll, type PermissionKey, type PermissionStatus } from '../lib/permissions'
+import { isNative } from '../lib/native'
 
 const LABEL: Record<PermissionStatus, string> = {
   granted: '✓ aktiv',
@@ -88,6 +89,11 @@ export function Onboarding({ onClose }: Props) {
                   : 'Alles eingerichtet. Viel Spaß draußen!'
                 : 'Ohne Standort kann die App nicht navigieren. Bitte wie oben beschrieben einschalten.'}
             </p>
+            {anyDenied && isNative() && (
+              <button className="big" onClick={() => openAppSettings()}>
+                ⚙ App-Einstellungen öffnen
+              </button>
+            )}
             <button className="primary big" onClick={finish}>
               Los geht's
             </button>

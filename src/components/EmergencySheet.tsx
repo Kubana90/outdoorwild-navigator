@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { emergencyMessage, formatDecimal, formatDms, nearestRescue, type RescuePoint } from '../lib/emergency'
 import { compassWord, type LonLat } from '../lib/geo'
 import { km } from '../lib/analysis'
+import { watchPosition } from '../lib/native'
 
 interface Props {
   /** live position while navigating; otherwise the sheet asks the GPS itself */
@@ -19,13 +20,11 @@ export function EmergencySheet({ pos, accuracy, rescuePoints, activityLabel, onC
   const [shared, setShared] = useState<string | null>(null)
 
   useEffect(() => {
-    if (pos || !('geolocation' in navigator)) return
-    const id = navigator.geolocation.watchPosition(
-      (p) => setOwn({ pos: [p.coords.longitude, p.coords.latitude], accuracy: p.coords.accuracy }),
+    if (pos) return
+    return watchPosition(
+      (p) => setOwn({ pos: p.pos, accuracy: p.accuracy }),
       () => setGpsError('Kein Standort – Umgebung beschreiben (Ort, Weg, Auffälliges).'),
-      { enableHighAccuracy: true, timeout: 30000, maximumAge: 5000 },
     )
-    return () => navigator.geolocation.clearWatch(id)
   }, [pos])
 
   const here = pos ?? own?.pos ?? null

@@ -7,6 +7,7 @@ import { clock, Navigator, rejoinTarget, REROUTE_AFTER_MS, REROUTE_EVERY_MS, typ
 import type { PlannedRoute } from '../lib/planner'
 import { isBikeActivity } from '../lib/profile'
 import { ElevationChart } from './ElevationChart'
+import { keepScreenOn, watchPosition } from '../lib/native'
 import { nearestRescue, type RescuePoint } from '../lib/emergency'
 import { highlightLabel, POI_ICON, type Highlight } from '../lib/poi'
 
@@ -102,6 +103,7 @@ export function NavigationView({ route, rescuePoints, highlights, onSos, onFix, 
   // keep the screen on while navigating
   useEffect(() => {
     let lock: WakeLockSentinel | null = null
+    keepScreenOn(true)
     const request = () => navigator.wakeLock?.request('screen').then((l) => (lock = l)).catch(() => {})
     request()
     // the lock is released when the app goes to the background: take it again
@@ -110,31 +112,21 @@ export function NavigationView({ route, rescuePoints, highlights, onSos, onFix, 
     return () => {
       document.removeEventListener('visibilitychange', onVisible)
       lock?.release().catch(() => {})
+      keepScreenOn(false)
     }
   }, [])
 
-  // real GPS
+  // real GPS (natively a background service, so it keeps going with the screen off)
   useEffect(() => {
     if (sim) return
-    if (!('geolocation' in navigator)) {
-      setGpsError('Dieses Gerät hat kein GPS. Nutze die Simulation.')
-      return
-    }
-    const id = navigator.geolocation.watchPosition(
+    return watchPosition(
       (p) => {
         setGpsError(null)
-        setFix({
-          pos: [p.coords.longitude, p.coords.latitude],
-          accuracy: p.coords.accuracy,
-          heading: p.coords.heading !== null && !Number.isNaN(p.coords.heading) && (p.coords.speed ?? 0) > 1 ? p.coords.heading : null,
-          speed: p.coords.speed,
-          time: p.timestamp,
-        })
+        setFix(p)
       },
-      (e) => setGpsError(e.code === 1 ? 'Standortzugriff verweigert. Erlaube ihn im Browser oder nutze die Simulation.' : 'Kein GPS-Signal.'),
-      { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 },
+      (e) =>
+        setGpsError(e === 'denied' ? 'Standortzugriff verweigert. Unter „⚙ Berechtigungen prüfen“ einschalten oder die Simulation nutzen.' : 'Kein GPS-Signal.'),
     )
-    return () => navigator.geolocation.clearWatch(id)
   }, [sim])
 
   // simulation: move along the route at simSpeed × planned speed

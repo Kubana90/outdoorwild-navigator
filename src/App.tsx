@@ -3,6 +3,7 @@ import { MapView, TOPO_TILES, flyTo, overlayTiles, type BaseMap, type MapPoint, 
 import { EmergencySheet } from './components/EmergencySheet'
 import { Onboarding } from './components/Onboarding'
 import { setupDone } from './lib/permissions'
+import { currentPosition as nativeCurrentPosition } from './lib/native'
 import { NavigationView } from './components/NavigationView'
 import { fetchRescuePoints, rescueAlongRoute, type RescuePoint } from './lib/emergency'
 import { PointInput, type RoutePoint } from './components/PointInput'
@@ -39,16 +40,7 @@ const WILD_WORDS = ['entspannt', 'naturnah', 'wild', 'sehr wild', 'abgelegen']
 type Mode = 'loop' | 'ab'
 type Target = 'start' | 'end' | 'via'
 
-function currentPosition(): Promise<LonLat> {
-  return new Promise((resolve, reject) => {
-    if (!('geolocation' in navigator)) return reject(new Error('Dieses Gerät hat kein GPS.'))
-    navigator.geolocation.getCurrentPosition(
-      (p) => resolve([p.coords.longitude, p.coords.latitude]),
-      (e) => reject(new Error(e.code === 1 ? 'Standortzugriff verweigert. Erlaube ihn in den Einstellungen.' : 'Standort nicht verfügbar. Freie Sicht zum Himmel suchen.')),
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 },
-    )
-  })
-}
+const currentPosition = async (): Promise<LonLat> => (await nativeCurrentPosition()).pos
 
 export default function App() {
   const [activity, setActivity] = useState<Activity>('mtb')

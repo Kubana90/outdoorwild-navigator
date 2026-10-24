@@ -17,6 +17,33 @@ LIVE=1 npx vitest run src/lib/live.test.ts   # echte Routensuche gegen brouter.d
 npm run build                               # Produktions-Build nach dist/ (PWA, offline-fähig)
 ```
 
+## Native App (Android / iPhone)
+
+Die App gibt es zusätzlich als echte Smartphone-App (Capacitor). Gegenüber der Web-App:
+GPS läuft als Hintergrunddienst weiter, wenn der Bildschirm aus ist; Berechtigungen kommen als
+System-Dialoge direkt bei der Einrichtung; Spracheingabe nutzt die Spracherkennung des Handys.
+
+**Android-APK bauen** (Android Studio mit SDK ist nötig):
+
+```bash
+npm run build:app
+```
+
+Danach in `android/` mit dem JDK von Android Studio: `gradlew.bat assembleDebug` → `android/app/build/outputs/apk/debug/app-debug.apk`.
+Installieren per USB: `adb install -r app-debug.apk`, oder die Datei aufs Handy schicken und öffnen
+(„Installation aus unbekannten Quellen“ einmal erlauben). Für den Play Store wird ein signiertes
+Release-Bundle gebraucht (`gradlew bundleRelease` mit eigenem Schlüssel) und ein Entwicklerkonto (25 $ einmalig).
+
+**iPhone** (nur auf einem Mac mit Xcode und Apple-Entwicklerkonto, 99 $/Jahr):
+
+```bash
+npm run build:app
+npx cap open ios
+```
+
+In Xcode das eigene Team unter *Signing & Capabilities* wählen, dann auf ein iPhone oder an TestFlight/App Store.
+Berechtigungstexte und Hintergrund-Standort sind in `ios/App/App/Info.plist` schon eingetragen.
+
 ## Online (GitHub Pages)
 
 Bei jedem Push auf `main` testet und baut [deploy.yml](.github/workflows/deploy.yml) die App und veröffentlicht sie unter **https://kubana90.github.io/outdoorwild-navigator/**.
