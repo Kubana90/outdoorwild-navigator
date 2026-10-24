@@ -8,6 +8,7 @@ import type { LonLat } from '../lib/geo'
 import { pointAt } from '../lib/geo'
 import type { PlannedRoute } from '../lib/planner'
 import { REGION } from '../lib/region'
+import type { RescuePoint } from '../lib/emergency'
 
 // Vite pre-bundles maplibre, which breaks its own worker lookup: point it at the file.
 maplibregl.setWorkerUrl(workerUrl)
@@ -59,6 +60,7 @@ interface Props {
   detour: LonLat[] | null
   /** the user dragged the map: stop following the position */
   onUserPan: () => void
+  rescue: RescuePoint[]
 }
 
 const empty = { type: 'FeatureCollection' as const, features: [] }
@@ -153,6 +155,22 @@ export function MapView(p: Props) {
       m.addSource('detour', { type: 'geojson', data: empty })
       m.addLayer({ id: 'detour-casing', type: 'line', source: 'detour', paint: { 'line-color': '#ffffff', 'line-width': 8 }, layout: { 'line-cap': 'round', 'line-join': 'round' } })
       m.addLayer({ id: 'detour-line', type: 'line', source: 'detour', paint: { 'line-color': '#e07b24', 'line-width': 5, 'line-dasharray': [1.5, 1.5] }, layout: { 'line-join': 'round' } })
+      m.addSource('rescue', { type: 'geojson', data: empty })
+      m.addLayer({
+        id: 'rescue',
+        type: 'circle',
+        source: 'rescue',
+        minzoom: 10,
+        paint: { 'circle-radius': 6, 'circle-color': '#d32f2f', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 },
+      })
+      m.addLayer({
+        id: 'rescue-label',
+        type: 'symbol',
+        source: 'rescue',
+        minzoom: 13,
+        layout: { 'text-field': ['get', 'ref'], 'text-font': ['Noto Sans Regular'], 'text-size': 11, 'text-offset': [0, 1.2], 'text-anchor': 'top' },
+        paint: { 'text-color': '#b71c1c', 'text-halo-color': '#fff', 'text-halo-width': 1.5 },
+      })
       m.addSource('hover', { type: 'geojson', data: empty })
       m.addLayer({ id: 'hover', type: 'circle', source: 'hover', paint: { 'circle-radius': 7, 'circle-color': '#ff6f00', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } })
     }
@@ -173,6 +191,10 @@ export function MapView(p: Props) {
     src('pts')?.setData({
       type: 'FeatureCollection',
       features: cur.points.map((pt) => ({ type: 'Feature', properties: { role: pt.role }, geometry: { type: 'Point', coordinates: pt.pos } })),
+    })
+    src('rescue')?.setData({
+      type: 'FeatureCollection',
+      features: cur.rescue.map((r) => ({ type: 'Feature', properties: { ref: r.ref }, geometry: { type: 'Point', coordinates: r.pos } })),
     })
     src('detour')?.setData(
       cur.detour ? { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: cur.detour } }] } : empty,
@@ -207,7 +229,7 @@ export function MapView(p: Props) {
   useEffect(() => {
     const m = map.current
     if (m && m.getSource('cand')) syncData(m)
-  }, [p.candidates, p.selectedId, p.points, p.hoverAlong, p.detour])
+  }, [p.candidates, p.selectedId, p.points, p.hoverAlong, p.detour, p.rescue])
 
   // fit to the candidates when a new search arrives
   useEffect(() => {

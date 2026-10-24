@@ -7,9 +7,12 @@ import { clock, Navigator, rejoinTarget, REROUTE_AFTER_MS, REROUTE_EVERY_MS, typ
 import type { PlannedRoute } from '../lib/planner'
 import { isBikeActivity } from '../lib/profile'
 import { ElevationChart } from './ElevationChart'
+import { nearestRescue, type RescuePoint } from '../lib/emergency'
 
 interface Props {
   route: PlannedRoute
+  rescuePoints: RescuePoint[]
+  onSos: () => void
   onFix: (fix: Fix | null) => void
   onDetour: (line: LonLat[] | null) => void
   onExit: () => void
@@ -72,7 +75,7 @@ function useNow(everyMs: number): number {
   return now
 }
 
-export function NavigationView({ route, onFix, onDetour, onExit, headingUp, onToggleHeadingUp, follow, onFollow }: Props) {
+export function NavigationView({ route, rescuePoints, onSos, onFix, onDetour, onExit, headingUp, onToggleHeadingUp, follow, onFollow }: Props) {
   const navigator_ = useMemo(() => new Navigator(route.raw, route.analysis), [route])
   const [state, setState] = useState<NavState | null>(null)
   const [fix, setFix] = useState<Fix | null>(null)
@@ -268,6 +271,12 @@ export function NavigationView({ route, onFix, onDetour, onExit, headingUp, onTo
       a.add('dark')
       speak('Achtung, du erreichst das Ziel voraussichtlich erst bei Dunkelheit. Prüfe, ob du umkehren oder abkürzen solltest.', voice)
     }
+    const t = state.turnaround
+    if (t?.advice === 'umkehren' && !a.has('turn')) {
+      a.add('turn')
+      vibrate([300, 150, 300])
+      speak(`Achtung: Bis zum Ziel reicht das Tageslicht nicht mehr. Umkehren bringt dich um ${clock(t.backArrival)} zurück zum Start.`, voice)
+    }
     if (state.finished && !a.has('done')) {
       a.add('done')
       vibrate([100, 60, 100, 60, 300])
@@ -308,6 +317,7 @@ export function NavigationView({ route, onFix, onDetour, onExit, headingUp, onTo
   const arrow = state ? (heading !== null ? angleDiff(heading, state.guideBearing) : state.guideBearing) : 0
   const daylightClass = state?.daylightBuffer == null ? '' : state.daylightBuffer < 0 ? 'bad' : state.daylightBuffer < 45 ? 'warn' : 'ok'
   const detourHint = state?.offTrack && detour?.state ? detour.state : null
+  const rescueNear = fix ? nearestRescue(fix.pos, rescuePoints) : null
   // a silent GPS outranks every instruction: the instruction would be stale too
   const topClass = gpsStale ? 'stale' : state?.offTrack ? (detourHint ? 'detour' : 'off') : ''
 
@@ -372,6 +382,9 @@ export function NavigationView({ route, onFix, onDetour, onExit, headingUp, onTo
           <div className={`compass-needle ${state?.offTrack ? 'off' : ''}`} style={{ transform: `rotate(${arrow}deg)` }} />
           <div className="compass-label">{state ? state.guideText : 'Pfad-Kompass'}</div>
         </div>
+        <button className="round sos-btn" onClick={onSos} title="Notfall">
+          SOS
+        </button>
         <button className="round" onClick={onToggleHeadingUp} title="Karte in Blickrichtung drehen">
           {headingUp ? '⇧' : 'N'}
         </button>
@@ -424,6 +437,30 @@ export function NavigationView({ route, onFix, onDetour, onExit, headingUp, onTo
                 </span>
               </div>
             </div>
+            {state.turnaround && (
+              <div className={`turn turn-${state.turnaround.advice}`}>
+                <div className="turn-row">
+                  <span>
+                    ▶ Weiter: <b>{km(state.turnaround.aheadDistance)}</b> · an {clock(state.turnaround.aheadArrival)}
+                  </span>
+                  <span>
+                    ◀ Umkehren: <b>{km(state.turnaround.backDistance)}</b> · an {clock(state.turnaround.backArrival)}
+                  </span>
+                </div>
+                <div className="turn-text">
+                  {state.turnaround.text}
+                  {state.turnaround.advice === 'weiter' && state.turnaround.latestTurn && state.turnaround.latestTurn.getTime() - now < 3 * 3600000
+                    ? ` Wer zum Start zurück will: spätestens ${clock(state.turnaround.latestTurn)} umkehren.`
+                    : ''}
+                </div>
+              </div>
+            )}
+            {rescueNear && (
+              <button className="rescue-line" onClick={onSos}>
+                🆘 Rettungspunkt <b>{rescueNear.ref}</b> · {rescueNear.distance < 1000 ? `${Math.round(rescueNear.distance)} m` : km(rescueNear.distance)}{' '}
+                {compassWord(rescueNear.bearing)}
+              </button>
+            )}
             {state.nextClimb && (
               <div className="climb">
                 ⛰ Anstieg in {km(state.nextClimb.inMetres)}: {Math.round(state.nextClimb.gain)} Hm auf {km(state.nextClimb.length)} (Ø{' '}

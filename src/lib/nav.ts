@@ -45,7 +45,60 @@ export interface NavState {
   sunset: Date | null
   /** minutes of daylight left at arrival, negative = arriving after dark */
   daylightBuffer: number | null
+  turnaround: Turnaround | null
   finished: boolean
+}
+
+export interface Turnaround {
+  /** metres back to the start along the way you came */
+  backDistance: number
+  /** metres to the finish going on */
+  aheadDistance: number
+  backArrival: Date
+  aheadArrival: Date
+  /** latest clock time to turn round and still be back at the start before dark (null: no sunset today) */
+  latestTurn: Date | null
+  advice: 'weiter' | 'umkehren' | 'beides-knapp'
+  text: string
+}
+
+/** Minutes before sunset that count as "too late". */
+export const DAYLIGHT_MARGIN_MIN = 15
+
+/**
+ * Should you go on or turn back? Compares the way back along your own track
+ * with the rest of the route, both against sunset. Turning back later costs
+ * twice (you ride further out and the same distance back), so the latest
+ * turn time is halfway between now and the moment the return alone would
+ * just make it.
+ */
+export function turnaroundCheck(
+  along: number,
+  remaining: number,
+  speed: number,
+  now: number,
+  sunset: Date | null,
+  isLoop: boolean,
+): Turnaround {
+  const backArrival = new Date(now + (along / speed) * 1000)
+  const aheadArrival = new Date(now + (remaining / speed) * 1000)
+  const deadline = sunset ? sunset.getTime() - DAYLIGHT_MARGIN_MIN * 60000 : null
+  // now + t + (along + v t) / v = deadline  →  t = (deadline - now - along / v) / 2
+  const latestTurn = deadline !== null ? new Date(now + Math.max(0, (deadline - now - (along / speed) * 1000) / 2)) : null
+
+  let advice: Turnaround['advice'] = 'weiter'
+  if (deadline !== null && aheadArrival.getTime() > deadline) advice = backArrival.getTime() <= deadline ? 'umkehren' : 'beides-knapp'
+
+  const goal = isLoop ? 'die Runde zu beenden' : 'das Ziel zu erreichen'
+  const text =
+    advice === 'umkehren'
+      ? `Umkehren! Um ${goal}, reicht das Tageslicht nicht mehr – zurück zum Start schon.`
+      : advice === 'beides-knapp'
+        ? 'Es wird in jedem Fall dunkel – den kürzesten Weg nehmen und Licht bereithalten.'
+        : along > remaining
+          ? 'Weiterfahren ist kürzer als umkehren.'
+          : 'Weiter auf der Route.'
+  return { backDistance: along, aheadDistance: remaining, backArrival, aheadArrival, latestTurn, advice, text }
 }
 
 const COMMAND_TEXT: Record<number, string> = {
@@ -157,6 +210,7 @@ export class Navigator {
   private readonly hints: Hint[]
   private readonly plannedSpeed: number
   private speedSamples: number[] = []
+  private readonly isLoop: boolean
 
   constructor(
     readonly route: RawRoute,
@@ -164,6 +218,8 @@ export class Navigator {
   ) {
     this.hints = usefulHints(route)
     this.plannedSpeed = analysis.length / Math.max(1, analysis.durationMin * 60)
+    const c = route.coords
+    this.isLoop = c.length > 1 && distance(c[0], c[c.length - 1]) < 300
   }
 
   update(fix: Fix): NavState {
@@ -227,6 +283,7 @@ export class Navigator {
       eta,
       sunset,
       daylightBuffer,
+      turnaround: along > 200 && !finished ? turnaroundCheck(along, remaining, speed, fix.time, sunset, this.isLoop) : null,
       finished,
     }
   }

@@ -187,6 +187,76 @@ describe('detour and track', () => {
   })
 })
 
+describe('turnaround', () => {
+  it('advises turning back when going on would end after dark but going back would not', async () => {
+    const { turnaroundCheck } = await import('./nav')
+    const now = Date.parse('2026-10-24T15:00:00Z')
+    const sunset = new Date('2026-10-24T16:30:00Z')
+    // 3 m/s: back 5 km = 28 min, ahead 20 km = 1 h 51 min
+    const t = turnaroundCheck(5000, 20000, 3, now, sunset, true)
+    expect(t.advice).toBe('umkehren')
+    // latest turn: (75 min − 27.8 min) / 2 ≈ 23.6 min from now
+    expect((t.latestTurn!.getTime() - now) / 60000).toBeCloseTo(23.6, 0)
+    expect(turnaroundCheck(5000, 4000, 3, now, sunset, true).advice).toBe('weiter')
+    expect(turnaroundCheck(30000, 30000, 3, now, sunset, true).advice).toBe('beides-knapp')
+  })
+})
+
+describe('weather', () => {
+  const hours = 96
+  const t0 = Date.parse('2026-10-22T00:00:00Z') / 1000
+  const mk = (rainPerHour: number, soil: number) => ({
+    time: Array.from({ length: hours }, (_, i) => t0 + i * 3600),
+    precipitation: Array(hours).fill(rainPerHour),
+    weatherCode: Array(hours).fill(3),
+    gusts: Array(hours).fill(20),
+    temperature: Array(hours).fill(10),
+    soilMoisture: Array(hours).fill(soil),
+  })
+  const surfaces = { paved: 0.2, gravel: 0.2, ground: 0.5, grass: 0.1, rock: 0, unknown: 0 }
+  const now = Date.parse('2026-10-24T10:00:00Z')
+
+  it('rates wet soft ground as muddy and dry ground as grippy', async () => {
+    const { mudIndex } = await import('./weather')
+    expect(mudIndex(mk(0.5, 0.36), now, surfaces).label).toMatch(/matschig/)
+    expect(mudIndex(mk(0, 0.15), now, surfaces).label).toBe('griffig')
+    // asphalt only: no mud whatever the weather
+    expect(mudIndex(mk(1, 0.4), now, { ...surfaces, paved: 1, gravel: 0, ground: 0, grass: 0 }).score).toBe(0)
+  })
+
+  it('picks a dry start time and flags storms', async () => {
+    const { bestWindow, tourWarnings } = await import('./weather')
+    const w = mk(0, 0.2)
+    // rain 10–12 UTC, dry afterwards
+    const i10 = (now / 1000 - t0) / 3600
+    w.precipitation[i10] = 3
+    w.precipitation[i10 + 1] = 3
+    w.weatherCode[i10] = 95
+    const best = bestWindow(w, now, 90, [9.2, 49.5])!
+    expect(best.start.getTime()).toBeGreaterThanOrEqual(now + 2 * 3600000)
+    expect(best.rain).toBe(0)
+    expect(tourWarnings(w, now, 90).join(' ')).toMatch(/Gewitter/)
+  })
+})
+
+describe('emergency', () => {
+  it('finds the nearest rescue point and formats coordinates for the control centre', async () => {
+    const { nearestRescue, formatDms, emergencyMessage } = await import('./emergency')
+    const here: LonLat = [9.2048, 49.5339]
+    const pts = [
+      { ref: 'NOK-1', pos: destination(here, 90, 2000) },
+      { ref: 'NOK-2', pos: destination(here, 0, 400) },
+    ]
+    const n = nearestRescue(here, pts)!
+    expect(n.ref).toBe('NOK-2')
+    expect(n.distance).toBeCloseTo(400, -1)
+    expect(formatDms(here)).toBe('49° 32′ 02″ N, 9° 12′ 17″ O')
+    const msg = emergencyMessage(here, 8, n, 'MTB')
+    expect(msg).toContain('NOK-2')
+    expect(msg).toContain('49.53390° N')
+  })
+})
+
 describe('brouter parsing', () => {
   it('reads coordinates, way segments and voice hints', () => {
     const json = {

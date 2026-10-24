@@ -2,6 +2,7 @@ import { duration, km, pct, SURFACE_LABEL, WAY_COLOR, WAY_LABEL, wildLabel, type
 import { clock, latestStart } from '../lib/nav'
 import type { PlannedRoute } from '../lib/planner'
 import { ElevationChart } from './ElevationChart'
+import { WeatherPanel } from './WeatherPanel'
 
 export function WildRing({ score, size = 46 }: { score: number; size?: number }) {
   const r = size / 2 - 4
@@ -79,9 +80,11 @@ interface DetailProps {
   onSave: () => void
   onOffline: () => void
   offlineProgress: string | null
+  /** rescue points near the route, null while loading */
+  rescueCount: number | null
 }
 
-export function RouteDetails({ route, onHover, onNavigate, onGpx, onSave, onOffline, offlineProgress }: DetailProps) {
+export function RouteDetails({ route, onHover, onNavigate, onGpx, onSave, onOffline, offlineProgress, rescueCount }: DetailProps) {
   const a = route.analysis
   const start = route.raw.coords[0]
   const latest = start ? latestStart(start, a.durationMin) : null
@@ -146,6 +149,14 @@ export function RouteDetails({ route, onHover, onNavigate, onGpx, onSave, onOffl
           ))}
         </div>
       </div>
+
+      <WeatherPanel route={route} />
+
+      {rescueCount !== null && (
+        <p className="muted small">
+          🆘 {rescueCount ? `${rescueCount} Rettungspunkte entlang der Route (rote Kreuze auf der Karte).` : 'Keine Rettungspunkte entlang der Route eingetragen.'}
+        </p>
+      )}
 
       {latest && (
         <p className={`daylight ${latest < now ? 'warn' : ''}`}>

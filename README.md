@@ -41,6 +41,9 @@ Einstellungen im Cloudflare-Projekt:
 | --- | --- | --- |
 | Wildnis-Profil | `src/lib/profile.ts` | erzeugt ein BRouter-Profil aus Aktivität, Wildnis-Regler (0–100), Schwierigkeit und 2-Meter-Regel |
 | Routing | `src/lib/brouter.ts` | lädt das Profil auf den BRouter-Server und holt Routen (mit Wiederholung, wenn der Server bremst) |
+| Notfall | `src/lib/emergency.ts`, `src/components/EmergencySheet.tsx` | SOS-Knopf: 112 anrufen, Koordinaten für die Leitstelle, nächster Rettungspunkt (OSM `highway=emergency_access_point` über Overpass, 7 Tage zwischengespeichert), Standort an Kontakt teilen |
+| Wetter & Boden | `src/lib/weather.ts`, `src/components/WeatherPanel.tsx` | Matsch-Index aus Bodenfeuchte, Regen der letzten 48 h und Naturboden-Anteil; bestes Zeitfenster heute; Warnung bei Gewitter, Böen, Frost (Open-Meteo) |
+| Umkehr-Check | `src/lib/nav.ts` (`turnaroundCheck`) | Live beim Navigieren: Weiter vs. Umkehren mit Ankunftszeiten, spätester Umkehrzeitpunkt vor Dunkelheit, Ansage wenn nur Umkehren noch vor Dunkelheit reicht |
 | Start/Ziel-Eingabe | `src/components/PointInput.tsx` | Ortssuche (Nominatim), eigener Standort, Karte antippen mit Rückwärtssuche des Namens; „Zum Ziel navigieren“ plant ab dem aktuellen Standort und startet die Führung sofort |
 | Routensuche | `src/lib/planner.ts` | A→B mit bis zu 4 Varianten, Rundtouren in 3 Richtungen, sortiert nach Wildnis-Score |
 | Analyse | `src/lib/analysis.ts` | Wildnis-Score, Wegearten, Untergrund, Anstiege, Zeit, Schwierigkeit, Beschreibungstext |

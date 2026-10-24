@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { MapView, TOPO_TILES, flyTo, overlayTiles, type BaseMap, type MapPoint, type Overlay } from './components/MapView'
+import { EmergencySheet } from './components/EmergencySheet'
 import { NavigationView } from './components/NavigationView'
+import { bboxOf, fetchRescuePoints, rescueAlongRoute, type RescuePoint } from './lib/emergency'
 import { PointInput, type RoutePoint } from './components/PointInput'
 import { RouteCard, RouteDetails } from './components/Routes'
 import { analyzeRoute, characterTags, describeRoute, km } from './lib/analysis'
@@ -81,9 +83,24 @@ export default function App() {
   const [follow, setFollow] = useState(true)
   const [headingUp, setHeadingUp] = useState(true)
   const [sheetOpen, setSheetOpen] = useState(true)
+  const [sosOpen, setSosOpen] = useState(false)
+  const [rescue, setRescue] = useState<{ routeId: string; all: RescuePoint[]; along: RescuePoint[] } | null>(null)
 
   const bike = isBikeActivity(activity)
   const selected = candidates.find((c) => c.id === selectedId) ?? null
+  const activeRoute = navRoute ?? selected
+
+  // rescue points around the active route; cached, so they stay available offline
+  useEffect(() => {
+    if (!activeRoute || rescue?.routeId === activeRoute.id) return
+    const ctrl = new AbortController()
+    const coords = activeRoute.raw.coords
+    fetchRescuePoints(bboxOf(coords), ctrl.signal)
+      .then((all) => setRescue({ routeId: activeRoute.id, all, along: rescueAlongRoute(coords, all) }))
+      .catch(() => {})
+    return () => ctrl.abort()
+  }, [activeRoute?.id])
+  const rescueHere = rescue && activeRoute && rescue.routeId === activeRoute.id ? rescue : null
   const options = { activity, wildness, maxDifficulty: bike ? mtbMax : sacMax, twoMetreRule: bike && twoMetreRule }
 
   useEffect(() => {
@@ -288,6 +305,7 @@ export default function App() {
         onSelect={setSelectedId}
         detour={detour}
         onUserPan={() => setFollow(false)}
+        rescue={rescueHere?.along ?? []}
       />
 
       <div className="layers">
@@ -300,11 +318,26 @@ export default function App() {
           <option value="hiking">Wanderwege</option>
           <option value="mtb">MTB-Routen</option>
         </select>
+        <button className="round sos-btn" onClick={() => setSosOpen(true)} title="Notfall">
+          SOS
+        </button>
       </div>
+
+      {sosOpen && (
+        <EmergencySheet
+          pos={fix?.pos ?? null}
+          accuracy={fix?.accuracy ?? null}
+          rescuePoints={rescueHere?.all ?? []}
+          activityLabel={ACTIVITIES.find((a) => a.id === (activeRoute?.options.activity ?? activity))?.label ?? ''}
+          onClose={() => setSosOpen(false)}
+        />
+      )}
 
       {navRoute && (
         <NavigationView
           route={navRoute}
+          rescuePoints={rescueHere?.all ?? []}
+          onSos={() => setSosOpen(true)}
           onFix={setFix}
           onDetour={setDetour}
           onExit={() => {
@@ -521,6 +554,7 @@ export default function App() {
               onSave={() => setSaved(saveRoute(selected))}
               onOffline={() => saveOffline(selected)}
               offlineProgress={offline}
+              rescueCount={rescueHere ? rescueHere.along.length : null}
             />
           )}
 

@@ -800,6 +800,162 @@ input[type='range'] {
   }
 }
 
+/* ---------- emergency ---------- */
+.sos-btn {
+  background: #d32f2f;
+  border-color: #d32f2f;
+  color: #fff;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+.layers .sos-btn {
+  width: auto;
+  height: auto;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.sos-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 10;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.sos {
+  width: 100%;
+  max-width: 520px;
+  max-height: 92vh;
+  overflow-y: auto;
+  background: var(--panel);
+  border-radius: 18px 18px 0 0;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sos header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.sos h2 {
+  margin: 0;
+  color: #d32f2f;
+}
+.sos-call {
+  display: block;
+  text-align: center;
+  background: #d32f2f;
+  color: #fff;
+  font-size: 22px;
+  font-weight: 800;
+  padding: 16px;
+  border-radius: 14px;
+  text-decoration: none;
+}
+.sos-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.sos-label {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.sos-big {
+  font-size: 22px;
+}
+.sos .warn {
+  color: #c77700;
+}
+.sos-note {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+.rescue-line {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin-top: 8px;
+  font-size: 13px;
+  color: #d32f2f;
+  background: none;
+  border: 1px dashed color-mix(in srgb, #d32f2f 40%, transparent);
+  padding: 6px 8px;
+}
+
+/* ---------- turnaround ---------- */
+.turn {
+  margin-top: 8px;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+  background: color-mix(in srgb, var(--moss) 10%, transparent);
+}
+.turn-umkehren {
+  background: #fff3e0;
+  color: #8a4b00;
+  border: 2px solid #e07b24;
+}
+.turn-beides-knapp {
+  background: #fdecea;
+  color: #8a1c1c;
+  border: 2px solid var(--danger);
+}
+.turn-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.turn-text {
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+/* ---------- weather ---------- */
+.weather {
+  margin-top: 10px;
+  font-size: 13px;
+}
+.weather p {
+  margin: 4px 0;
+}
+.mud-head {
+  display: flex;
+  justify-content: space-between;
+}
+.mud-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--line);
+  overflow: hidden;
+  margin: 4px 0;
+}
+.mud-bar span {
+  display: block;
+  height: 100%;
+}
+.weather-warn {
+  color: #b25e0e;
+  font-weight: 600;
+}
+.weather-window {
+  font-weight: 600;
+}
+.small {
+  font-size: 11.5px;
+}
+
 /* ---------- start / destination rows ---------- */
 .point {
   display: grid;
