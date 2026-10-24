@@ -48,6 +48,7 @@ Einstellungen im Cloudflare-Projekt:
 | Zeitbudget | `src/lib/analysis.ts` (`lengthForMinutes`) | „Ich habe 2 h“ → passende Rundenlänge aus Tempo und typischer Hügeligkeit (18 Hm/km) |
 | Sprachbefehl | `src/lib/voice.ts` | Mikrofon-Knopf an Start und Ziel: „Navigiere zum Katzenbuckel“ → Ortssuche, bester Treffer wird übernommen |
 | Overpass | `src/lib/overpass.ts`, `src/lib/region.ts` (`queryBbox`) | ein Zugriffspunkt mit Ersatz-Server; für Routen in der Heimatregion wird die ganze Region einmal geladen und 7 Tage gespeichert |
+| Einrichtung | `src/lib/permissions.ts`, `src/components/Onboarding.tsx` | Beim ersten Start: ein Knopf fragt Kompass (iOS), Standort, Mikrofon und dauerhaften Speicher nacheinander ab; zeigt den Zustand und bei Ablehnung, wo man es einschaltet. Später über „⚙ Berechtigungen prüfen“ |
 | Start/Ziel-Eingabe | `src/components/PointInput.tsx` | Ortssuche (Nominatim), eigener Standort, Karte antippen mit Rückwärtssuche des Namens; „Zum Ziel navigieren“ plant ab dem aktuellen Standort und startet die Führung sofort |
 | Routensuche | `src/lib/planner.ts` | A→B mit bis zu 4 Varianten, Rundtouren in 3 Richtungen, sortiert nach Wildnis-Score |
 | Analyse | `src/lib/analysis.ts` | Wildnis-Score, Wegearten, Untergrund, Anstiege, Zeit, Schwierigkeit, Beschreibungstext |

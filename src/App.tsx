@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { MapView, TOPO_TILES, flyTo, overlayTiles, type BaseMap, type MapPoint, type Overlay } from './components/MapView'
 import { EmergencySheet } from './components/EmergencySheet'
+import { Onboarding } from './components/Onboarding'
+import { setupDone } from './lib/permissions'
 import { NavigationView } from './components/NavigationView'
 import { fetchRescuePoints, rescueAlongRoute, type RescuePoint } from './lib/emergency'
 import { PointInput, type RoutePoint } from './components/PointInput'
@@ -88,6 +90,7 @@ export default function App() {
   const [headingUp, setHeadingUp] = useState(true)
   const [sheetOpen, setSheetOpen] = useState(true)
   const [sosOpen, setSosOpen] = useState(false)
+  const [setupOpen, setSetupOpen] = useState(() => !setupDone())
   const [rescue, setRescue] = useState<{ routeId: string; all: RescuePoint[]; along: RescuePoint[] } | null>(null)
   const [highlights, setHighlights] = useState<{ routeId: string; along: Highlight[] } | null>(null)
 
@@ -341,6 +344,8 @@ export default function App() {
           SOS
         </button>
       </div>
+
+      {setupOpen && <Onboarding onClose={() => setSetupOpen(false)} />}
 
       {sosOpen && (
         <EmergencySheet
@@ -624,6 +629,10 @@ export default function App() {
               <input type="file" accept=".gpx,application/gpx+xml" onChange={(e) => e.target.files?.[0] && importGpx(e.target.files[0])} hidden />
             </label>
           </section>
+
+          <button className="link" onClick={() => setSetupOpen(true)}>
+            ⚙ Berechtigungen prüfen
+          </button>
 
           <footer className="legal">
             Routen: <a href="https://brouter.de">BRouter</a> · Daten © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap-Mitwirkende</a>.

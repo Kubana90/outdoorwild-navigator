@@ -944,6 +944,78 @@ input[type='range'] {
   color: #fff;
 }
 
+/* ---------- onboarding ---------- */
+.onboarding-backdrop {
+  align-items: center;
+  z-index: 20;
+}
+.onboarding {
+  border-radius: 18px;
+  margin: 12px;
+}
+.onboarding h2 {
+  color: var(--moss);
+}
+.onboarding p {
+  margin: 0;
+  font-size: 14px;
+}
+.perm-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.perm {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--card);
+}
+.perm div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.perm div span {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.perm .perm-fix {
+  color: #8a4b00;
+  font-weight: 600;
+}
+.perm-state {
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.perm-granted .perm-state {
+  color: var(--moss);
+}
+.perm-denied .perm-state {
+  color: var(--danger);
+}
+.perm.asking {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.perm-ok {
+  color: var(--moss);
+  font-weight: 600;
+}
+.perm-bad {
+  color: var(--danger);
+  font-weight: 600;
+}
+
 /* ---------- turnaround ---------- */
 .turn {
   margin-top: 8px;
