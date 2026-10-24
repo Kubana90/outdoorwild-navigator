@@ -44,6 +44,10 @@ npx cap open ios
 In Xcode das eigene Team unter *Signing & Capabilities* wählen, dann auf ein iPhone oder an TestFlight/App Store.
 Berechtigungstexte und Hintergrund-Standort sind in `ios/App/App/Info.plist` schon eingetragen.
 
+Ohne eigenen Mac prüft [ios.yml](.github/workflows/ios.yml) bei jedem Push auf einem Mac von GitHub, dass die
+iPhone-App fehlerfrei baut (Simulator, unsigniert). Spracheingabe nutzt auf dem iPhone die Spracherkennung der
+WebView, weil das Speech-Plugin für Capacitor 8 kein Swift-Paket hat.
+
 ## Online (GitHub Pages)
 
 Bei jedem Push auf `main` testet und baut [deploy.yml](.github/workflows/deploy.yml) die App und veröffentlicht sie unter **https://kubana90.github.io/outdoorwild-navigator/**.
