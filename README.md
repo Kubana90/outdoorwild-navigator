@@ -41,6 +41,7 @@ Einstellungen im Cloudflare-Projekt:
 | --- | --- | --- |
 | Wildnis-Profil | `src/lib/profile.ts` | erzeugt ein BRouter-Profil aus Aktivität, Wildnis-Regler (0–100), Schwierigkeit und 2-Meter-Regel |
 | Routing | `src/lib/brouter.ts` | lädt das Profil auf den BRouter-Server und holt Routen (mit Wiederholung, wenn der Server bremst) |
+| Start/Ziel-Eingabe | `src/components/PointInput.tsx` | Ortssuche (Nominatim), eigener Standort, Karte antippen mit Rückwärtssuche des Namens; „Zum Ziel navigieren“ plant ab dem aktuellen Standort und startet die Führung sofort |
 | Routensuche | `src/lib/planner.ts` | A→B mit bis zu 4 Varianten, Rundtouren in 3 Richtungen, sortiert nach Wildnis-Score |
 | Analyse | `src/lib/analysis.ts` | Wildnis-Score, Wegearten, Untergrund, Anstiege, Zeit, Schwierigkeit, Beschreibungstext |
 | Navigation | `src/lib/nav.ts`, `src/components/NavigationView.tsx` | Fortschritt, Abbiegehinweise mit Wegeart, Weg-verlassen-Erkennung, automatischer Rückweg zum Pfad (nach 8 s abseits), Pfad-Kompass, Anstiegs-Vorschau, Tageslicht, GPS-Ausfall-Warnung, Track-Aufzeichnung als GPX |

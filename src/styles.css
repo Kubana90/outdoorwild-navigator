@@ -800,6 +800,81 @@ input[type='range'] {
   }
 }
 
+/* ---------- start / destination rows ---------- */
+.point {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  gap: 8px 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+}
+.point.active {
+  border-color: var(--moss);
+  box-shadow: 0 0 0 1px var(--moss) inset;
+}
+.point .dot {
+  width: 14px;
+  height: 14px;
+}
+.point-form {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+.point-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.point-form button {
+  padding: 6px 10px;
+}
+.point-value {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.point-value b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.point-label {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.point .places,
+.point .hint {
+  grid-column: 1 / -1;
+}
+.point .places {
+  margin: 0;
+}
+.go-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.go-row .big {
+  width: 100%;
+  padding: 12px;
+  font-size: 15px;
+}
+.go-row .primary.big {
+  margin-top: 0;
+}
+
 .check {
   display: flex;
   gap: 8px;

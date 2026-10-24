@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { MapView, TOPO_TILES, flyTo, overlayTiles, type BaseMap, type MapPoint, type Overlay } from './components/MapView'
 import { NavigationView } from './components/NavigationView'
+import { PointInput, type RoutePoint } from './components/PointInput'
 import { RouteCard, RouteDetails } from './components/Routes'
 import { analyzeRoute, characterTags, describeRoute, km } from './lib/analysis'
-import { searchPlaces, type Place } from './lib/geocode'
+import { reverseGeocode } from './lib/geocode'
 import type { LonLat } from './lib/geo'
 import { download, fromGpx, toGpx } from './lib/gpx'
 import { primeSpeech, requestCompassPermission } from './lib/device'
@@ -31,6 +32,18 @@ const DIRECTIONS: { label: string; deg: number | null }[] = [
 const WILD_WORDS = ['entspannt', 'naturnah', 'wild', 'sehr wild', 'abgelegen']
 
 type Mode = 'loop' | 'ab'
+type Target = 'start' | 'end' | 'via'
+
+function currentPosition(): Promise<LonLat> {
+  return new Promise((resolve, reject) => {
+    if (!('geolocation' in navigator)) return reject(new Error('Dieses Gerät hat kein GPS.'))
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve([p.coords.longitude, p.coords.latitude]),
+      (e) => reject(new Error(e.code === 1 ? 'Standortzugriff verweigert. Erlaube ihn in den Einstellungen.' : 'Standort nicht verfügbar. Freie Sicht zum Himmel suchen.')),
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 },
+    )
+  })
+}
 
 export default function App() {
   const [activity, setActivity] = useState<Activity>('mtb')
@@ -39,16 +52,18 @@ export default function App() {
   const [sacMax, setSacMax] = useState(3)
   const [twoMetreRule, setTwoMetreRule] = useState(true)
   const [mode, setMode] = useState<Mode>('loop')
-  const [start, setStart] = useState<LonLat | null>(null)
-  const [end, setEnd] = useState<LonLat | null>(null)
+  const [start, setStart] = useState<RoutePoint | null>(null)
+  const [end, setEnd] = useState<RoutePoint | null>(null)
   const [vias, setVias] = useState<LonLat[]>([])
+  /** which point the next map tap sets */
+  const [target, setTarget] = useState<Target>('start')
   const [loopKm, setLoopKm] = useState(25)
   const [direction, setDirection] = useState<number | null>(null)
 
   const [candidates, setCandidates] = useState<PlannedRoute[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [fitKey, setFitKey] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState<null | 'search' | 'navigate'>(null)
   const [error, setError] = useState<string | null>(null)
   const [stale, setStale] = useState(false)
   const abort = useRef<AbortController | null>(null)
@@ -57,8 +72,6 @@ export default function App() {
   const [overlay, setOverlay] = useState<Overlay>('none')
   const [hoverAlong, setHoverAlong] = useState<number | null>(null)
 
-  const [query, setQuery] = useState('')
-  const [places, setPlaces] = useState<Place[]>([])
   const [saved, setSaved] = useState<SavedRoute[]>(() => loadSaved())
   const [offline, setOffline] = useState<string | null>(null)
 
@@ -71,6 +84,7 @@ export default function App() {
 
   const bike = isBikeActivity(activity)
   const selected = candidates.find((c) => c.id === selectedId) ?? null
+  const options = { activity, wildness, maxDifficulty: bike ? mtbMax : sacMax, twoMetreRule: bike && twoMetreRule }
 
   useEffect(() => {
     if (candidates.length) setStale(true)
@@ -81,50 +95,67 @@ export default function App() {
   }, [bike])
 
   const points: MapPoint[] = [
-    ...(start ? [{ pos: start, role: 'start' as const }] : []),
+    ...(start ? [{ pos: start.pos, role: 'start' as const }] : []),
     ...(mode === 'ab' ? vias.map((v) => ({ pos: v, role: 'via' as const })) : []),
-    ...(mode === 'ab' && end ? [{ pos: end, role: 'end' as const }] : []),
+    ...(mode === 'ab' && end ? [{ pos: end.pos, role: 'end' as const }] : []),
   ]
+
+  /** Sets a point from the map with a provisional name, then looks the name up. */
+  const setPointFromMap = (role: 'start' | 'end', pos: LonLat) => {
+    const set = role === 'start' ? setStart : setEnd
+    set({ pos, name: 'Punkt auf der Karte' })
+    reverseGeocode(pos).then((name) => set((cur) => (cur && cur.pos === pos ? { pos, name } : cur)))
+    setStale(candidates.length > 0)
+  }
 
   const onMapClick = (pos: LonLat) => {
     if (navRoute) {
       setFollow(false)
       return
     }
-    if (mode === 'loop' || !start) setStart(pos)
-    else if (!end) setEnd(pos)
-    else setVias((v) => [...v, pos])
-    setStale(candidates.length > 0)
+    if (mode === 'loop') {
+      setPointFromMap('start', pos)
+      return
+    }
+    if (target === 'start' || !start) {
+      setPointFromMap('start', pos)
+      setTarget(end ? 'via' : 'end')
+    } else if (target === 'end' || !end) {
+      setPointFromMap('end', pos)
+      setTarget('via')
+    } else {
+      setVias((v) => [...v, pos])
+      setStale(candidates.length > 0)
+    }
   }
 
-  const useMyPosition = () => {
-    navigator.geolocation?.getCurrentPosition(
-      (p) => {
-        const pos: LonLat = [p.coords.longitude, p.coords.latitude]
-        setStart(pos)
-        flyTo(pos)
-      },
-      () => setError('Standort nicht verfügbar. Tippe den Start auf die Karte.'),
-      { enableHighAccuracy: true, timeout: 15000 },
-    )
-  }
-
-  const doSearch = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!query.trim()) return
+  const useMyPosition = async () => {
     try {
-      setPlaces(await searchPlaces(query, start ?? undefined))
+      const pos = await currentPosition()
+      setStart({ pos, name: 'Mein Standort' })
+      setTarget(end ? 'via' : 'end')
+      flyTo(pos)
     } catch (err) {
       setError((err as Error).message)
     }
   }
 
-  const pickPlace = (p: Place) => {
-    if (mode === 'loop' || !start) setStart(p.pos)
-    else setEnd(p.pos)
-    setPlaces([])
-    setQuery('')
+  const pickPlace = (role: 'start' | 'end', p: RoutePoint) => {
+    if (role === 'start') {
+      setStart(p)
+      setTarget(mode === 'ab' && !end ? 'end' : 'via')
+    } else {
+      setEnd(p)
+      setTarget('via')
+    }
+    setStale(candidates.length > 0)
     flyTo(p.pos)
+  }
+
+  /** Region chips fill the point the user is working on. */
+  const pickRegionPlace = (p: (typeof REGION_PLACES)[number]) => {
+    const role = mode === 'ab' && start && (target === 'end' || !end) ? 'end' : 'start'
+    pickPlace(role, { pos: p.pos, name: p.name })
   }
 
   const findRoutes = async () => {
@@ -132,14 +163,13 @@ export default function App() {
     abort.current?.abort()
     const ctrl = new AbortController()
     abort.current = ctrl
-    setLoading(true)
+    setLoading('search')
     setError(null)
-    const options = { activity, wildness, maxDifficulty: bike ? mtbMax : sacMax, twoMetreRule: bike && twoMetreRule }
     try {
       const found =
         mode === 'loop'
-          ? await planLoops({ start, length: loopKm * 1000, direction }, options, ctrl.signal)
-          : await planPointToPoint([start, ...vias, end!], options, ctrl.signal)
+          ? await planLoops({ start: start.pos, length: loopKm * 1000, direction }, options, ctrl.signal)
+          : await planPointToPoint([start.pos, ...vias, end!.pos], options, ctrl.signal)
       setCandidates(found)
       setSelectedId(found[0]?.id ?? null)
       setFitKey(String(Date.now()))
@@ -148,7 +178,44 @@ export default function App() {
     } catch (err) {
       if ((err as Error).name !== 'AbortError') setError((err as Error).message)
     } finally {
-      setLoading(false)
+      setLoading(null)
+    }
+  }
+
+  const startNavigation = async (route: PlannedRoute) => {
+    // both need a tap on iPhones; the tap is the button that called us
+    primeSpeech()
+    await requestCompassPermission()
+    setNavRoute(route)
+    setFollow(true)
+  }
+
+  /** Plan from here (or the chosen start) to the destination and guide right away. */
+  const navigateToDestination = async () => {
+    if (!end) return
+    abort.current?.abort()
+    const ctrl = new AbortController()
+    abort.current = ctrl
+    setLoading('navigate')
+    setError(null)
+    primeSpeech()
+    try {
+      let from = start
+      if (!from) {
+        const pos = await currentPosition()
+        from = { pos, name: 'Mein Standort' }
+        setStart(from)
+      }
+      const found = await planPointToPoint([from.pos, ...vias, end.pos], options, ctrl.signal)
+      setCandidates(found)
+      setSelectedId(found[0].id)
+      setFitKey(String(Date.now()))
+      setStale(false)
+      await startNavigation(found[0])
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') setError((err as Error).message)
+    } finally {
+      setLoading(null)
     }
   }
 
@@ -156,6 +223,7 @@ export default function App() {
     setStart(null)
     setEnd(null)
     setVias([])
+    setTarget('start')
     setCandidates([])
     setSelectedId(null)
   }
@@ -276,6 +344,78 @@ export default function App() {
             ))}
           </div>
 
+          <div className="seg modes">
+            <button className={mode === 'loop' ? 'on' : ''} onClick={() => setMode('loop')}>
+              ⟳ Rundtour
+            </button>
+            <button
+              className={mode === 'ab' ? 'on' : ''}
+              onClick={() => {
+                setMode('ab')
+                setTarget(start ? 'end' : 'start')
+              }}
+            >
+              → Zum Ziel
+            </button>
+          </div>
+
+          <div className="points">
+            <PointInput
+              role="start"
+              value={start}
+              active={mode === 'loop' || target === 'start'}
+              near={end?.pos}
+              onActivate={() => setTarget('start')}
+              onPick={(p) => pickPlace('start', p)}
+              onClear={() => {
+                setStart(null)
+                setTarget('start')
+              }}
+              onMyPosition={useMyPosition}
+            />
+            {mode === 'ab' && (
+              <PointInput
+                role="end"
+                value={end}
+                active={target === 'end'}
+                near={start?.pos}
+                onActivate={() => setTarget('end')}
+                onPick={(p) => pickPlace('end', p)}
+                onClear={() => {
+                  setEnd(null)
+                  setTarget('end')
+                }}
+              />
+            )}
+            {mode === 'ab' && !start && <div className="hint">Ohne Start wird ab deinem aktuellen Standort navigiert.</div>}
+            {mode === 'ab' && start && end && (
+              <div className="hint">
+                {vias.length ? `${vias.length} Zwischenpunkt(e) gesetzt. ` : ''}Tippe auf die Karte, um Zwischenpunkte hinzuzufügen.
+              </div>
+            )}
+            {(start || end || vias.length > 0) && (
+              <button className="link" onClick={clearPoints}>
+                Alle Punkte löschen
+              </button>
+            )}
+          </div>
+
+          <div className="region">
+            <div className="region-head">
+              Orte im {REGION.name}
+              <button className="link" onClick={() => flyTo(REGION.center)}>
+                Region zeigen
+              </button>
+            </div>
+            <div className="chips">
+              {REGION_PLACES.map((p) => (
+                <button key={p.name} className="chip-btn" title={p.note} onClick={() => pickRegionPlace(p)}>
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <label className="field">
             <div className="field-head">
               <span>Wildnis-Regler</span>
@@ -324,69 +464,6 @@ export default function App() {
             </label>
           )}
 
-          <div className="seg modes">
-            <button className={mode === 'loop' ? 'on' : ''} onClick={() => setMode('loop')}>
-              ⟳ Rundtour
-            </button>
-            <button className={mode === 'ab' ? 'on' : ''} onClick={() => setMode('ab')}>
-              → Von A nach B
-            </button>
-          </div>
-
-          <div className="region">
-            <div className="region-head">
-              Startorte im {REGION.name}
-              <button className="link" onClick={() => flyTo(REGION.center)}>
-                Region zeigen
-              </button>
-            </div>
-            <div className="chips">
-              {REGION_PLACES.map((p) => (
-                <button key={p.name} className="chip-btn" title={p.note} onClick={() => pickPlace({ name: p.name, detail: p.note, pos: p.pos })}>
-                  {p.name}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <form className="search" onSubmit={doSearch}>
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Ort suchen, z. B. Katzenbuckel" aria-label="Ort suchen" />
-            <button type="submit">Suchen</button>
-          </form>
-          {places.length > 0 && (
-            <ul className="places">
-              {places.map((p, i) => (
-                <li key={i}>
-                  <button onClick={() => pickPlace(p)}>
-                    <b>{p.name}</b> <span className="muted">{p.detail}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <div className="points">
-            <div className={`pt ${start ? 'set' : ''}`}>
-              <i className="dot start" />
-              {start ? `Start gesetzt` : mode === 'loop' ? 'Start: auf die Karte tippen' : 'Start: auf die Karte tippen'}
-              <button className="link" onClick={useMyPosition}>
-                ◎ Mein Standort
-              </button>
-            </div>
-            {mode === 'ab' && (
-              <div className={`pt ${end ? 'set' : ''}`}>
-                <i className="dot end" />
-                {end ? `Ziel gesetzt${vias.length ? ` · ${vias.length} Zwischenpunkt(e)` : ''}` : 'Ziel: auf die Karte tippen'}
-              </div>
-            )}
-            {mode === 'ab' && end && <div className="hint">Weitere Klicks auf die Karte fügen Zwischenpunkte hinzu.</div>}
-            {(start || end) && (
-              <button className="link" onClick={clearPoints}>
-                Punkte löschen
-              </button>
-            )}
-          </div>
-
           {mode === 'loop' && (
             <>
               <label className="field">
@@ -406,12 +483,22 @@ export default function App() {
                   ))}
                 </div>
               </div>
+              <button className="primary big" disabled={!canSearch || !!loading} onClick={findRoutes}>
+                {loading ? 'Suche wilde Wege …' : stale ? '↻ Neu suchen' : 'Rundtouren finden'}
+              </button>
             </>
           )}
 
-          <button className="primary big" disabled={!canSearch || loading} onClick={findRoutes}>
-            {loading ? 'Suche wilde Wege …' : stale ? '↻ Neu suchen' : mode === 'loop' ? 'Rundtouren finden' : 'Routen finden'}
-          </button>
+          {mode === 'ab' && (
+            <div className="go-row">
+              <button className="primary big" disabled={!end || !!loading} onClick={navigateToDestination}>
+                {loading === 'navigate' ? 'Route wird berechnet …' : '▶ Zum Ziel navigieren'}
+              </button>
+              <button className="big" disabled={!canSearch || !!loading} onClick={findRoutes}>
+                {loading === 'search' ? 'Suche …' : stale ? '↻ Varianten neu suchen' : 'Varianten vergleichen'}
+              </button>
+            </div>
+          )}
           {error && <div className="error">{error}</div>}
 
           {candidates.length > 0 && (
@@ -429,13 +516,7 @@ export default function App() {
             <RouteDetails
               route={selected}
               onHover={setHoverAlong}
-              onNavigate={async () => {
-                // both need a tap on iPhones; the tap is this button
-                primeSpeech()
-                await requestCompassPermission()
-                setNavRoute(selected)
-                setFollow(true)
-              }}
+              onNavigate={() => startNavigation(selected)}
               onGpx={() => download(`${selected.title.replace(/\W+/g, '_')}.gpx`, toGpx(selected.raw, selected.title, selected.description))}
               onSave={() => setSaved(saveRoute(selected))}
               onOffline={() => saveOffline(selected)}
