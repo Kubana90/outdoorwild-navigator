@@ -1,6 +1,6 @@
 // Voice input for places: "Navigiere zum Katzenbuckel" → "Katzenbuckel".
 
-import { isNative, nativeListen } from './native'
+import { isNative, nativeListen, platform } from './native'
 
 type Recognition = {
   lang: string
@@ -18,8 +18,11 @@ const ctor = (): (new () => Recognition) | null => {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null
 }
 
-// the Android WebView has no SpeechRecognition: the native app uses the phone's recogniser
-export const voiceSupported = () => typeof window !== 'undefined' && (isNative() || ctor() !== null)
+// The Android WebView has no SpeechRecognition, so the Android app uses the
+// phone's recogniser through a plugin. That plugin has no iOS package for
+// Capacitor 8, so the iPhone app uses the WebView's recogniser when it has one.
+const useNativePlugin = () => isNative() && platform() === 'android'
+export const voiceSupported = () => typeof window !== 'undefined' && (useNativePlugin() || ctor() !== null)
 
 const FILLERS = [
   /^(bitte\s+)?(navigiere|navigier|führe|fuehre|bring|bringe|fahre|fahr|lotse|lotsen)\s+(mich\s+)?(bitte\s+)?(zum|zur|nach|zu|in den|in die|ins|an den|an die|auf den|auf die)\s+/i,
@@ -37,7 +40,7 @@ export function parseVoiceDestination(text: string): string {
 
 /** One utterance, resolved as text; rejects with 'nicht verstanden' or 'kein Mikrofon'. */
 export function listenOnce(lang = 'de-DE'): Promise<string> {
-  if (isNative()) return nativeListen(lang)
+  if (useNativePlugin()) return nativeListen(lang)
   return new Promise((resolve, reject) => {
     const R = ctor()
     if (!R) return reject(new Error('kein Mikrofon'))

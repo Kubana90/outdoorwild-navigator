@@ -44,6 +44,8 @@ async function readNative(key: PermissionKey): Promise<PermissionStatus | null> 
       return nativeState((await LocalNotifications.checkPermissions()).display)
     }
     case 'microphone': {
+      // the speech plugin exists only on Android; iOS asks through the WebView
+      if (platform() !== 'android') return null
       const { SpeechRecognition } = await import('@capacitor-community/speech-recognition')
       return nativeState((await SpeechRecognition.checkPermissions()).speechRecognition)
     }
@@ -66,6 +68,7 @@ async function requestNative(key: PermissionKey): Promise<PermissionStatus | nul
       return nativeState((await LocalNotifications.requestPermissions()).display)
     }
     case 'microphone': {
+      if (platform() !== 'android') return null
       const { SpeechRecognition } = await import('@capacitor-community/speech-recognition')
       return nativeState((await SpeechRecognition.requestPermissions()).speechRecognition)
     }
