@@ -9,12 +9,15 @@ import { isBikeActivity } from '../lib/profile'
 import { ElevationChart } from './ElevationChart'
 import { keepScreenOn, watchPosition } from '../lib/native'
 import { nearestRescue, type RescuePoint } from '../lib/emergency'
-import { highlightLabel, POI_ICON, type Highlight } from '../lib/poi'
+import { detourCandidates, highlightLabel, onTheWay, POI_ICON, type Highlight } from '../lib/poi'
+import { fetchWikiSummary, shortStory } from '../lib/wiki'
 
 interface Props {
   route: PlannedRoute
   rescuePoints: RescuePoint[]
   highlights: Highlight[]
+  /** opens a place's sheet (story, detour button) */
+  onPoiOpen: (h: Highlight) => void
   onSos: () => void
   onFix: (fix: Fix | null) => void
   onDetour: (line: LonLat[] | null) => void
@@ -78,7 +81,7 @@ function useNow(everyMs: number): number {
   return now
 }
 
-export function NavigationView({ route, rescuePoints, highlights, onSos, onFix, onDetour, onExit, headingUp, onToggleHeadingUp, follow, onFollow }: Props) {
+export function NavigationView({ route, rescuePoints, highlights, onPoiOpen, onSos, onFix, onDetour, onExit, headingUp, onToggleHeadingUp, follow, onFollow }: Props) {
   const navigator_ = useMemo(() => new Navigator(route.raw, route.analysis), [route])
   const [state, setState] = useState<NavState | null>(null)
   const [fix, setFix] = useState<Fix | null>(null)
@@ -94,11 +97,24 @@ export function NavigationView({ route, rescuePoints, highlights, onSos, onFix, 
   const announced = useRef(new Set<string>())
   const wasOff = useRef(false)
   const deviate = useRef(0)
+  const simRoute = useRef(route)
   const offSince = useRef<number | null>(null)
   const rerouteAt = useRef(0)
   const rerouteAbort = useRef<AbortController | null>(null)
   const track = useRef<TrackPoint[]>([])
   const bike = isBikeActivity(route.options.activity)
+  // one-sentence stories for the history places on this route, loaded up front so they work offline too
+  const stories = useRef(new Map<string, string>())
+  useEffect(() => {
+    const ctrl = new AbortController()
+    for (const h of highlights) {
+      if (h.category !== 'history' || (!h.wikipedia && !h.wikidata)) continue
+      fetchWikiSummary(h.wikipedia, h.wikidata, ctrl.signal)
+        .then((w) => w?.extract && stories.current.set(h.name ?? h.kind, shortStory(w.extract, 200)))
+        .catch(() => {})
+    }
+    return () => ctrl.abort()
+  }, [highlights])
 
   // keep the screen on while navigating
   useEffect(() => {
@@ -134,7 +150,9 @@ export function NavigationView({ route, rescuePoints, highlights, onSos, onFix, 
     if (!sim) return
     const r = route.raw
     const planned = route.analysis.length / Math.max(1, route.analysis.durationMin * 60)
-    let along = state?.along ?? 0
+    // a new route (detour spliced in) starts where you stand: from its beginning
+    let along = simRoute.current === route ? (state?.along ?? 0) : 0
+    simRoute.current = route
     const t = setInterval(() => {
       along = Math.min(r.length, along + planned * simSpeed)
       let pos = pointAt(r.coords, r.cum, along)
@@ -147,7 +165,7 @@ export function NavigationView({ route, rescuePoints, highlights, onSos, onFix, 
       setFix({ pos, accuracy: 5, heading: brg, speed: planned * simSpeed, time: Date.now() })
     }, 1000)
     return () => clearInterval(t)
-  }, [sim, simSpeed])
+  }, [sim, simSpeed, route])
 
   // computes a way from the current position back onto the route
   const reroute = (f: Fix, along: number) => {
@@ -265,13 +283,25 @@ export function NavigationView({ route, rescuePoints, highlights, onSos, onFix, 
       a.add('dark')
       speak('Achtung, du erreichst das Ziel voraussichtlich erst bei Dunkelheit. Prüfe, ob du umkehren oder abkürzen solltest.', voice)
     }
-    const hl = highlights.find((x) => x.along > state.along && x.along - state.along <= 300)
+    // places right on the way: announced 300 m ahead, history with a sentence of its story
+    const hl = onTheWay(highlights).find((x) => x.along > state.along && x.along - state.along <= 300)
     if (hl) {
       const key = `h${Math.round(hl.along)}`
       if (!a.has(key)) {
         a.add(key)
         const where = hl.side === 'am Weg' ? 'direkt am Weg' : hl.side
-        speak(`In ${Math.round((hl.along - state.along) / 50) * 50} Metern: ${hl.kind}${hl.name ? ` ${hl.name}` : ''}, ${where}.`, voice)
+        const story = hl.category === 'history' ? stories.current.get(hl.name ?? hl.kind) : undefined
+        speak(`In ${Math.round((hl.along - state.along) / 50) * 50} Metern: ${hl.kind}${hl.name ? ` ${hl.name}` : ''}, ${where}.${story ? ` ${story}` : ''}`, voice)
+      }
+    }
+    // landmarks a bit off the way: offered as a detour once, when you're close
+    const dc = detourCandidates(highlights).find((x) => x.along > state.along && x.along - state.along <= 400)
+    if (dc) {
+      const key = `d${Math.round(dc.along)}`
+      if (!a.has(key)) {
+        a.add(key)
+        vibrate([60, 60, 60])
+        speak(`Abstecher möglich: ${dc.kind}${dc.name ? ` ${dc.name}` : ''}, ${Math.round(dc.offset / 50) * 50} Meter ${dc.side}. Tippe auf die Karte unten für den Weg dorthin.`, voice)
       }
     }
     const t = state.turnaround
@@ -321,7 +351,8 @@ export function NavigationView({ route, rescuePoints, highlights, onSos, onFix, 
   const daylightClass = state?.daylightBuffer == null ? '' : state.daylightBuffer < 0 ? 'bad' : state.daylightBuffer < 45 ? 'warn' : 'ok'
   const detourHint = state?.offTrack && detour?.state ? detour.state : null
   const rescueNear = fix ? nearestRescue(fix.pos, rescuePoints) : null
-  const nextHighlight = state ? (highlights.find((x) => x.along > state.along - 30 && x.along - state.along <= 1500) ?? null) : null
+  const nextHighlight = state ? (onTheWay(highlights).find((x) => x.along > state.along - 30 && x.along - state.along <= 1500) ?? null) : null
+  const nextDetour = state ? (detourCandidates(highlights).find((x) => x.along > state.along - 150 && x.along - state.along <= 1500) ?? null) : null
   // a silent GPS outranks every instruction: the instruction would be stale too
   const topClass = gpsStale ? 'stale' : state?.offTrack ? (detourHint ? 'detour' : 'off') : ''
 
@@ -460,10 +491,20 @@ export function NavigationView({ route, rescuePoints, highlights, onSos, onFix, 
               </div>
             )}
             {nextHighlight && (
-              <div className="poi-line">
+              <button className={`poi-line hl-${nextHighlight.category}`} onClick={() => onPoiOpen(nextHighlight)}>
                 {POI_ICON[nextHighlight.kind]} {highlightLabel(nextHighlight)} in {metres(nextHighlight.along - state.along)}
-                {nextHighlight.side !== 'am Weg' ? ` · ${nextHighlight.side}` : ''}
-              </div>
+                {nextHighlight.side !== 'am Weg' ? ` · ${nextHighlight.side}` : ''} ›
+              </button>
+            )}
+            {nextDetour && (
+              <button className="detour-offer" onClick={() => onPoiOpen(nextDetour)}>
+                <span>
+                  {POI_ICON[nextDetour.kind]} Abstecher: <b>{nextDetour.name ?? nextDetour.kind}</b>
+                </span>
+                <span>
+                  {Math.round(nextDetour.offset)} m {nextDetour.side} · in {metres(Math.max(0, nextDetour.along - state.along))} ›
+                </span>
+              </button>
             )}
             {rescueNear && (
               <button className="rescue-line" onClick={onSos}>

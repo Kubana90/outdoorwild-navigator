@@ -5,6 +5,7 @@ import { analyzeRoute, characterTags, describeRoute, type RouteAnalysis } from '
 import { fetchRoute, type RawRoute } from './brouter'
 import { bearing, destination, distance, type LonLat } from './geo'
 import type { ProfileOptions } from './profile'
+import type { Poi } from './poi'
 
 export interface PlannedRoute {
   id: string
@@ -23,6 +24,8 @@ export interface LoopRequest {
   length: number
   /** preferred direction in degrees, or null for "any" */
   direction: number | null
+  /** when given, the loop is bent to pass the best of these places */
+  landmarks?: Poi[]
 }
 
 const DIRECTION_NAMES = ['Norden', 'Nordosten', 'Osten', 'Südosten', 'Süden', 'Südwesten', 'Westen', 'Nordwesten']
@@ -112,21 +115,57 @@ export async function planLoops(req: LoopRequest, options: ProfileOptions, signa
   const base = req.direction ?? 0
   const dirs = req.direction === null ? [base, base + 120, base + 240] : [base - 35, base, base + 35]
 
+  // only named places: a loop "über Ruine" tells nobody where it goes
+  const landmarks = (req.landmarks ?? []).filter((p) => p.category === 'history' && p.importance >= 2 && !!p.name && distance(p.pos, req.start) > 500)
+  const bend = (wps: LonLat[], length: number) =>
+    landmarks.length ? bendTowardsLandmarks(wps, landmarks, length / (2 * Math.PI)) : { wps, via: [] as Poi[] }
+
   const one = async (dir: number) => {
-    let wps = loopWaypoints(req.start, req.length, dir)
+    let { wps, via } = bend(loopWaypoints(req.start, req.length, dir), req.length)
     let raw = await fetchRoute([req.start, ...wps, req.start], options, 0, signal)
     // one correction pass if the loop came out far too long or too short
     const ratio = raw.length / req.length
     if (ratio < 0.8 || ratio > 1.25) {
-      wps = loopWaypoints(req.start, req.length / ratio, dir)
+      ;({ wps, via } = bend(loopWaypoints(req.start, req.length / ratio, dir), req.length / ratio))
       raw = await fetchRoute([req.start, ...wps, req.start], options, 0, signal)
     }
     const heading = bearing(req.start, wps[1])
-    return build(raw, `Runde Richtung ${dirName(heading)}`, [req.start, ...wps, req.start], options)
+    const named = via.map((p) => p.name ?? p.kind)
+    const title = named.length ? `Runde über ${named.slice(0, 2).join(' & ')}` : `Runde Richtung ${dirName(heading)}`
+    return build(raw, title, [req.start, ...wps, req.start], options)
   }
   const { ok: found, error } = await settle(dirs.map((d) => () => one(d)))
   if (!found.length) throw error ?? new Error('Keine Rundtour gefunden. Versuche eine andere Länge oder einen anderen Startpunkt.')
   return rank(dedupe(found))
+}
+
+/**
+ * Bends loop waypoints towards landmarks: each waypoint is swapped for the
+ * most important place within `reach` metres of it (castles before ruins,
+ * nearer before farther). Returns the waypoints and the places used.
+ */
+export function bendTowardsLandmarks(wps: LonLat[], landmarks: Poi[], reach: number): { wps: LonLat[]; via: Poi[] } {
+  const via: Poi[] = []
+  const out = wps.map((wp) => {
+    let best: Poi | null = null
+    let bestScore = -Infinity
+    for (const p of landmarks) {
+      if (via.includes(p)) continue
+      const d = distance(wp, p.pos)
+      if (d > reach) continue
+      const score = p.importance * 1000 + (p.wikipedia || p.wikidata ? 500 : 0) - d
+      if (score > bestScore) {
+        best = p
+        bestScore = score
+      }
+    }
+    if (best) {
+      via.push(best)
+      return best.pos
+    }
+    return wp
+  })
+  return { wps: out, via }
 }
 
 /** Wildest first; ties broken by shorter length. */

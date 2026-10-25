@@ -63,10 +63,17 @@ export interface Snap {
  * which is accurate enough for the few hundred metres that matter here.
  * `from`/`to` limit the searched vertex range (for progress tracking).
  */
-export function snapToLine(p: LonLat, line: LonLat[], cum: number[], from = 0, to = line.length - 1): Snap {
+/**
+ * `prefer`: where along the line we expect to be. Out-and-back legs and loops
+ * that reuse a path have several equally close spots; each metre away from
+ * the expected progress then costs 0.05 m, so the continuous one wins while a
+ * spot that is really closer still does.
+ */
+export function snapToLine(p: LonLat, line: LonLat[], cum: number[], from = 0, to = line.length - 1, prefer?: number): Snap {
   const kx = Math.cos(rad(p[1])) * 111320
   const ky = 110540
   let best: Snap = { index: 0, t: 0, point: line[0], offset: Infinity, along: 0 }
+  let bestCost = Infinity
   const lo = Math.max(0, from)
   const hi = Math.min(line.length - 1, to)
   for (let i = lo; i < hi; i++) {
@@ -83,13 +90,16 @@ export function snapToLine(p: LonLat, line: LonLat[], cum: number[], from = 0, t
     const cx = ax + t * dx
     const cy = ay + t * dy
     const off = Math.hypot(cx, cy)
-    if (off < best.offset) {
+    const along = cum[i] + (cum[i + 1] - cum[i]) * t
+    const cost = prefer === undefined ? off : off + Math.abs(along - prefer) * 0.05
+    if (cost < bestCost) {
+      bestCost = cost
       best = {
         index: i,
         t,
         point: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t],
         offset: off,
-        along: cum[i] + (cum[i + 1] - cum[i]) * t,
+        along,
       }
     }
   }

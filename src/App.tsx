@@ -9,9 +9,12 @@ import { fetchRescuePoints, rescueAlongRoute, type RescuePoint } from './lib/eme
 import { PointInput, type RoutePoint } from './components/PointInput'
 import { RouteCard, RouteDetails } from './components/Routes'
 import { analyzeRoute, characterTags, describeRoute, km, lengthForMinutes } from './lib/analysis'
-import { fetchPois, highlightsAlongRoute, type Highlight } from './lib/poi'
+import { fetchPois, highlightsAlongRoute, POI_ICON, type Highlight, type Poi } from './lib/poi'
+import { planDetour } from './lib/routeops'
+import { withRetry } from './lib/overpass'
+import { PoiSheet } from './components/PoiSheet'
 import { reverseGeocode } from './lib/geocode'
-import type { LonLat } from './lib/geo'
+import { distance, snapToLine, type LonLat } from './lib/geo'
 import { download, fromGpx, toGpx } from './lib/gpx'
 import { primeSpeech, requestCompassPermission } from './lib/device'
 import type { Fix } from './lib/nav'
@@ -59,6 +62,11 @@ export default function App() {
   const [loopBy, setLoopBy] = useState<'km' | 'time'>('time')
   const [loopHours, setLoopHours] = useState(2)
   const [direction, setDirection] = useState<number | null>(null)
+  /** bend loops to pass castles, forts and ruins */
+  const [viaHistory, setViaHistory] = useState(true)
+  /** every place in the home region, loaded once and cached */
+  const [regionPois, setRegionPois] = useState<Poi[]>([])
+  const [poiSheet, setPoiSheet] = useState<Poi | Highlight | null>(null)
 
   const [candidates, setCandidates] = useState<PlannedRoute[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -95,30 +103,60 @@ export default function App() {
     if (!activeRoute || rescue?.routeId === activeRoute.id) return
     const ctrl = new AbortController()
     const coords = activeRoute.raw.coords
-    fetchRescuePoints(queryBbox(coords), ctrl.signal)
+    withRetry(() => fetchRescuePoints(queryBbox(coords), ctrl.signal), ctrl.signal)
       .then((all) => setRescue({ routeId: activeRoute.id, all, along: rescueAlongRoute(coords, all) }))
       .catch(() => {})
     return () => ctrl.abort()
   }, [activeRoute?.id])
   const rescueHere = rescue && activeRoute && rescue.routeId === activeRoute.id ? rescue : null
 
-  // natural highlights next to the active route
+  useEffect(() => {
+    const ctrl = new AbortController()
+    withRetry(() => fetchPois(queryBbox([REGION.center]), ctrl.signal), ctrl.signal)
+      .then(setRegionPois)
+      .catch(() => {})
+    return () => ctrl.abort()
+  }, [])
+
+  // places next to the active route
   useEffect(() => {
     if (!activeRoute || highlights?.routeId === activeRoute.id) return
     const ctrl = new AbortController()
-    fetchPois(queryBbox(activeRoute.raw.coords, 0.01), ctrl.signal)
+    withRetry(() => fetchPois(queryBbox(activeRoute.raw.coords, 0.01), ctrl.signal), ctrl.signal)
       .then((pois) => setHighlights({ routeId: activeRoute.id, along: highlightsAlongRoute(activeRoute.raw, pois) }))
       .catch(() => {})
     return () => ctrl.abort()
   }, [activeRoute?.id])
   const highlightsHere = highlights && activeRoute && highlights.routeId === activeRoute.id ? highlights.along : null
+  // with no route on the map, show the region's landmarks to explore
+  const landmarks = regionPois.filter((p) => p.category === 'history' && p.importance === 3)
+  const mapPlaces: (Poi | Highlight)[] = activeRoute ? (highlightsHere ?? []) : landmarks
+  const historyNearby = (() => {
+    const from = start?.pos ?? REGION.center
+    return landmarks
+      .map((p) => ({ p, d: distance(from, p.pos) }))
+      .filter((x) => x.d < 15000)
+      .sort((a, b) => a.d - b.d)
+      .slice(0, 8)
+  })()
+
+  /** Splices a detour to `poi` into the running navigation. */
+  const detourTo = async (poi: Poi | Highlight) => {
+    if (!navRoute) return
+    if (!fix) throw new Error('Kein GPS-Standort – der Abstecher braucht deine Position.')
+    const { coords, cum } = navRoute.raw
+    const here = snapToLine(fix.pos, coords, cum).along
+    const target = 'along' in poi ? poi : { ...poi, along: snapToLine(poi.pos, coords, cum).along }
+    const next = await planDetour(navRoute, fix.pos, here, target)
+    setNavRoute(next)
+  }
 
   const loopLength = loopBy === 'time' ? lengthForMinutes(activity, loopHours * 60) : loopKm * 1000
   const options = { activity, wildness, maxDifficulty: bike ? mtbMax : sacMax, twoMetreRule: bike && twoMetreRule }
 
   useEffect(() => {
     if (candidates.length) setStale(true)
-  }, [activity, wildness, mtbMax, sacMax, twoMetreRule, loopKm, loopBy, loopHours, direction])
+  }, [activity, wildness, mtbMax, sacMax, twoMetreRule, loopKm, loopBy, loopHours, direction, viaHistory])
 
   useEffect(() => {
     setLoopKm((k) => (bike ? Math.max(k, 15) : Math.min(k, 15)))
@@ -198,7 +236,7 @@ export default function App() {
     try {
       const found =
         mode === 'loop'
-          ? await planLoops({ start: start.pos, length: loopLength, direction }, options, ctrl.signal)
+          ? await planLoops({ start: start.pos, length: loopLength, direction, landmarks: viaHistory ? regionPois : undefined }, options, ctrl.signal)
           : await planPointToPoint([start.pos, ...vias, end!.pos], options, ctrl.signal)
       setCandidates(found)
       setSelectedId(found[0]?.id ?? null)
@@ -319,7 +357,8 @@ export default function App() {
         detour={detour}
         onUserPan={() => setFollow(false)}
         rescue={rescueHere?.along ?? []}
-        highlights={highlightsHere ?? []}
+        highlights={mapPlaces}
+        onPoiClick={(i) => mapPlaces[i] && setPoiSheet(mapPlaces[i])}
       />
 
       <div className="layers">
@@ -339,6 +378,28 @@ export default function App() {
 
       {setupOpen && <Onboarding onClose={() => setSetupOpen(false)} />}
 
+      {poiSheet && (
+        <PoiSheet
+          poi={poiSheet}
+          from={fix?.pos ?? start?.pos ?? null}
+          along={navRoute && fix ? snapToLine(fix.pos, navRoute.raw.coords, navRoute.raw.cum).along : null}
+          onClose={() => setPoiSheet(null)}
+          onDetour={navRoute ? () => detourTo(poiSheet) : undefined}
+          onSetDestination={
+            navRoute
+              ? undefined
+              : () => {
+                  setMode('ab')
+                  setEnd({ pos: poiSheet.pos, name: poiSheet.name ?? poiSheet.kind })
+                  setTarget(start ? 'via' : 'start')
+                  setStale(candidates.length > 0)
+                  setPoiSheet(null)
+                  flyTo(poiSheet.pos)
+                }
+          }
+        />
+      )}
+
       {sosOpen && (
         <EmergencySheet
           pos={fix?.pos ?? null}
@@ -354,6 +415,7 @@ export default function App() {
           route={navRoute}
           rescuePoints={rescueHere?.all ?? []}
           highlights={highlightsHere ?? []}
+          onPoiOpen={setPoiSheet}
           onSos={() => setSosOpen(true)}
           onFix={setFix}
           onDetour={setDetour}
@@ -450,6 +512,20 @@ export default function App() {
             )}
           </div>
 
+          {historyNearby.length > 0 && (
+            <div className="history-near">
+              <div className="region-head">Burgen & Geschichte {start ? 'in der Nähe' : 'in der Region'}</div>
+              <div className="chips">
+                {historyNearby.map(({ p, d }) => (
+                  <button key={`${p.name}-${p.pos[0]}`} className="chip-btn hist" onClick={() => setPoiSheet(p)}>
+                    {POI_ICON[p.kind]} {p.name ?? p.kind}
+                    {start ? <span className="muted"> {d < 1000 ? `${Math.round(d)} m` : `${(d / 1000).toFixed(1).replace('.', ',')} km`}</span> : null}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="region">
             <div className="region-head">
               Orte im {REGION.name}
@@ -516,6 +592,13 @@ export default function App() {
 
           {mode === 'loop' && (
             <>
+              <label className="check">
+                <input type="checkbox" checked={viaHistory} onChange={(e) => setViaHistory(e.target.checked)} />
+                <span>
+                  Über Burgen, Kastelle & Ruinen führen
+                  <small>Die Runde wird zu historischen Orten in der Nähe gebogen ({landmarks.length} in der Region)</small>
+                </span>
+              </label>
               <div className="field inline">
                 <span>Runde planen nach</span>
                 <div className="seg small">
@@ -600,6 +683,7 @@ export default function App() {
               offlineProgress={offline}
               rescueCount={rescueHere ? rescueHere.along.length : null}
               highlights={highlightsHere}
+              onPoiOpen={setPoiSheet}
             />
           )}
 

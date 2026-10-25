@@ -5,7 +5,7 @@
 // route, so the card also works without signal once a route was planned.
 
 import { bearing, compassWord, distance, type LonLat } from './geo'
-import { overpass } from './overpass'
+import { elementPos, overpass } from './overpass'
 
 export interface RescuePoint {
   ref: string
@@ -51,8 +51,8 @@ export async function fetchRescuePoints(bbox: [number, number, number, number], 
   const query = `[out:json][timeout:30];node["highway"="emergency_access_point"](${s},${w},${n},${e});out;`
   const elements = await overpass(query, signal)
   const points = elements
-    .filter((el) => el.tags?.ref)
-    .map((el) => ({ ref: el.tags!.ref, pos: [el.lon, el.lat] as LonLat, note: el.tags!.description || el.tags!.name || undefined }))
+    .filter((el) => el.tags?.ref && elementPos(el))
+    .map((el) => ({ ref: el.tags!.ref, pos: elementPos(el) as LonLat, note: el.tags!.description || el.tags!.name || undefined }))
   try {
     // an empty answer may be a gap in the data: ask again next time
     if (points.length) localStorage.setItem(key, JSON.stringify({ t: Date.now(), points }))

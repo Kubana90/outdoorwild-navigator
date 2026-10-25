@@ -3,7 +3,7 @@ import { clock, latestStart } from '../lib/nav'
 import type { PlannedRoute } from '../lib/planner'
 import { ElevationChart } from './ElevationChart'
 import { WeatherPanel } from './WeatherPanel'
-import { highlightLabel, POI_ICON, type Highlight } from '../lib/poi'
+import { detourCandidates, highlightLabel, onTheWay, POI_ICON, type Highlight } from '../lib/poi'
 
 export function WildRing({ score, size = 46 }: { score: number; size?: number }) {
   const r = size / 2 - 4
@@ -73,6 +73,23 @@ export function RouteCard({ route, rank, selected, onSelect }: CardProps) {
   )
 }
 
+function HighlightRow({ h, onHover, onOpen }: { h: Highlight; onHover: (along: number | null) => void; onOpen: (h: Highlight) => void }) {
+  return (
+    <li className={`hl-${h.category}`} onMouseEnter={() => onHover(h.along)} onMouseLeave={() => onHover(null)} onClick={() => onOpen(h)}>
+      <span className="hl-km">km {(h.along / 1000).toFixed(1).replace('.', ',')}</span>
+      <span className="hl-icon">{POI_ICON[h.kind]}</span>
+      <span className="hl-text">
+        {highlightLabel(h)}
+        <small>
+          {h.side === 'am Weg' ? 'direkt am Weg' : `${h.side}, ${Math.round(h.offset)} m abseits`}
+          {h.wikipedia || h.wikidata ? ' · mit Geschichte' : ''}
+        </small>
+      </span>
+      <span className="hl-more">›</span>
+    </li>
+  )
+}
+
 interface DetailProps {
   route: PlannedRoute
   onHover: (along: number | null) => void
@@ -83,11 +100,12 @@ interface DetailProps {
   offlineProgress: string | null
   /** rescue points near the route, null while loading */
   rescueCount: number | null
-  /** natural highlights along the route, null while loading */
+  /** places along the route, null while loading */
   highlights: Highlight[] | null
+  onPoiOpen: (h: Highlight) => void
 }
 
-export function RouteDetails({ route, onHover, onNavigate, onGpx, onSave, onOffline, offlineProgress, rescueCount, highlights }: DetailProps) {
+export function RouteDetails({ route, onHover, onNavigate, onGpx, onSave, onOffline, offlineProgress, rescueCount, highlights, onPoiOpen }: DetailProps) {
   const a = route.analysis
   const start = route.raw.coords[0]
   const latest = start ? latestStart(start, a.durationMin) : null
@@ -155,22 +173,29 @@ export function RouteDetails({ route, onHover, onNavigate, onGpx, onSave, onOffl
 
       {highlights && highlights.length > 0 && (
         <section className="highlights">
-          <h4>Natur-Highlights am Weg</h4>
-          <ul>
-            {highlights.map((h, i) => (
-              <li key={i} onMouseEnter={() => onHover(h.along)} onMouseLeave={() => onHover(null)} onClick={() => onHover(h.along)}>
-                <span className="hl-km">km {(h.along / 1000).toFixed(1).replace('.', ',')}</span>
-                <span className="hl-icon">{POI_ICON[h.kind]}</span>
-                <span className="hl-text">
-                  {highlightLabel(h)}
-                  <small>{h.side === 'am Weg' ? 'direkt am Weg' : `${h.side}, ${Math.round(h.offset)} m abseits`}</small>
-                </span>
-              </li>
-            ))}
-          </ul>
+          {onTheWay(highlights).length > 0 && (
+            <>
+              <h4>Am Weg</h4>
+              <ul>
+                {onTheWay(highlights).map((h, i) => (
+                  <HighlightRow key={`w${i}`} h={h} onHover={onHover} onOpen={onPoiOpen} />
+                ))}
+              </ul>
+            </>
+          )}
+          {detourCandidates(highlights).length > 0 && (
+            <>
+              <h4>Abstecher lohnen sich</h4>
+              <ul>
+                {detourCandidates(highlights).map((h, i) => (
+                  <HighlightRow key={`d${i}`} h={h} onHover={onHover} onOpen={onPoiOpen} />
+                ))}
+              </ul>
+            </>
+          )}
         </section>
       )}
-      {highlights && highlights.length === 0 && <p className="muted small">Keine besonderen Natur-Punkte direkt am Weg eingetragen.</p>}
+      {highlights && highlights.length === 0 && <p className="muted small">Keine besonderen Orte direkt an dieser Route eingetragen.</p>}
 
       <WeatherPanel route={route} />
 

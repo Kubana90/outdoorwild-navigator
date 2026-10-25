@@ -206,6 +206,7 @@ function remainingAscent(ele: number[], cum: number[], along: number): number {
 
 export class Navigator {
   private lastIndex = 0
+  private lastAlong = 0
   private offCount = 0
   private readonly hints: Hint[]
   private readonly plannedSpeed: number
@@ -226,12 +227,13 @@ export class Navigator {
     const r = this.route
     const last = r.coords.length - 1
     // search near the last known progress first, then everywhere
-    let snap = snapToLine(fix.pos, r.coords, r.cum, this.lastIndex - 30, this.lastIndex + 400)
+    let snap = snapToLine(fix.pos, r.coords, r.cum, this.lastIndex - 30, this.lastIndex + 400, this.lastAlong)
     if (snap.offset > 120) {
-      const global = snapToLine(fix.pos, r.coords, r.cum)
+      const global = snapToLine(fix.pos, r.coords, r.cum, 0, r.coords.length - 1, this.lastAlong)
       if (global.offset < snap.offset) snap = global
     }
     this.lastIndex = snap.index
+    this.lastAlong = snap.along
 
     this.offCount = snap.offset > OFF_TRACK_METRES + Math.min(fix.accuracy, 30) ? this.offCount + 1 : 0
     const offTrack = this.offCount >= 2

@@ -41,6 +41,22 @@ describe('geo', () => {
   })
 })
 
+describe('out-and-back', () => {
+  it('keeps the progress continuous where the way out and back overlap', async () => {
+    const start: LonLat = [9.07, 49.4]
+    const turn = destination(start, 90, 1000)
+    const line: LonLat[] = []
+    for (let d = 0; d <= 1000; d += 20) line.push(destination(start, 90, d))
+    for (let d = 1000; d >= 0; d -= 20) line.push(destination(start, 90, d))
+    const cum = cumulative(line)
+    const near = destination(start, 90, 100)
+    // without a hint either leg may win; with the expected progress the way out does
+    expect(snapToLine(near, line, cum, 0, line.length - 1, 0).along).toBeCloseTo(100, -1)
+    expect(snapToLine(near, line, cum, 0, line.length - 1, 1900).along).toBeCloseTo(1900, -1)
+    expect(distance(turn, line[50])).toBeLessThan(1)
+  })
+})
+
 describe('analysis', () => {
   it('classifies way types', () => {
     expect(wayKind({ highway: 'path', surface: 'ground' })).toBe('trail')
@@ -283,15 +299,90 @@ describe('highlights', () => {
     const r = lineRoute([{}, {}]) // runs north
     const onRoute = pointAt(r.coords, r.cum, 800)
     const pois = [
-      { kind: 'Aussichtspunkt' as const, name: 'Blick', pos: destination(onRoute, 90, 60) },
-      { kind: 'Quelle' as const, name: null, pos: destination(pointAt(r.coords, r.cum, 300), 270, 40) },
-      { kind: 'Gipfel' as const, name: 'Fern', pos: destination(onRoute, 90, 900) },
+      { kind: 'Aussichtspunkt' as const, category: 'nature' as const, importance: 2 as const, name: 'Blick', pos: destination(onRoute, 90, 60) },
+      { kind: 'Quelle' as const, category: 'nature' as const, importance: 1 as const, name: null, pos: destination(pointAt(r.coords, r.cum, 300), 270, 40) },
+      { kind: 'Gipfel' as const, category: 'nature' as const, importance: 2 as const, name: 'Fern', pos: destination(onRoute, 90, 900) },
+      // a castle 500 m off the way still counts, as a possible detour
+      { kind: 'Burgruine' as const, category: 'history' as const, importance: 3 as const, name: 'Minneburg', pos: destination(pointAt(r.coords, r.cum, 1500), 90, 500) },
     ]
     const h = highlightsAlongRoute(r, pois)
-    expect(h.map((x) => x.kind)).toEqual(['Quelle', 'Aussichtspunkt'])
+    expect(h.map((x) => x.kind)).toEqual(['Quelle', 'Aussichtspunkt', 'Burgruine'])
+    const { detourCandidates, onTheWay } = await import('./poi')
+    expect(onTheWay(h).map((x) => x.kind)).toEqual(['Quelle', 'Aussichtspunkt'])
+    expect(detourCandidates(h).map((x) => x.name)).toEqual(['Minneburg'])
     expect(h[0].side).toBe('links')
     expect(h[1].side).toBe('rechts')
     expect(h[1].along).toBeCloseTo(800, -1)
+  })
+})
+
+describe('history places', () => {
+  it('classifies castles, Roman forts and ruins from OSM tags', async () => {
+    const { classify } = await import('./poi')
+    expect(classify({ historic: 'castle', castle_type: 'stately', name: 'Schloss Hochhausen' })?.kind).toBe('Schloss')
+    expect(classify({ historic: 'castle', name: 'Minneburg', ruins: 'yes' })?.kind).toBe('Burgruine')
+    expect(classify({ historic: 'archaeological_site', site_type: 'castrum', name: 'Kastell Walldürn' })?.kind).toBe('Römerkastell')
+    expect(classify({ historic: 'archaeological_site', site_type: 'tumulus', name: 'Hügelgräber im Wald' })?.kind).toBe('Grabhügel')
+    expect(classify({ historic: 'memorial', name: 'Gedenktafel' })).toBeNull() // plaques without an article stay out
+    expect(classify({ historic: 'memorial', name: 'Kriegerdenkmal', wikipedia: 'de:X' })?.category).toBe('history')
+    expect(classify({ amenity: 'shelter', shelter_type: 'public_transport' })).toBeNull()
+    expect(classify({ historic: 'castle', name: 'Schlossplatz' })).toBeNull()
+    expect(classify({ historic: 'memorial', wikidata: 'Q1' })).toBeNull()
+    const { importanceOf } = await import('./poi')
+    expect(importanceOf('Burgruine', { name: 'Minneburg' })).toBe(3)
+    expect(importanceOf('Denkmal', { name: 'Orkane 1990', wikidata: 'Q1' })).toBe(2)
+    expect(importanceOf('Bodendenkmal', { name: 'Viereckschanze', wikipedia: 'de:X' })).toBe(3)
+  })
+
+  it('keeps one entry per castle that OSM has several times', async () => {
+    const { dedupePois } = await import('./poi')
+    const a = { kind: 'Burg' as const, category: 'history' as const, importance: 3 as const, name: 'Burg Zwingenberg', pos: [9.04, 49.415] as LonLat, wikipedia: 'de:Burg Zwingenberg' }
+    const b = { ...a, pos: [9.0405, 49.4152] as LonLat, wikipedia: undefined, importance: 2 as const }
+    const other = { ...a, name: 'Burg Stolzeneck', wikipedia: 'de:Burg Stolzeneck', pos: [9.0, 49.45] as LonLat }
+    const keep = { ...a, name: null, wikipedia: undefined, importance: 2 as const, pos: [9.0402, 49.4151] as LonLat }
+    const out = dedupePois([b, keep, a, other])
+    expect(out).toHaveLength(2)
+    expect(out.find((p) => p.name === 'Burg Zwingenberg')?.wikipedia).toBe('de:Burg Zwingenberg')
+  })
+
+  it('bends a loop waypoint to the nearby castle', async () => {
+    const { bendTowardsLandmarks } = await import('./planner')
+    const wp: LonLat = [9.1, 49.45]
+    const castle = { kind: 'Burg' as const, category: 'history' as const, importance: 3 as const, name: 'Burg', pos: destination(wp, 45, 600) }
+    const far = { ...castle, name: 'Fern', pos: destination(wp, 45, 5000) }
+    const { wps, via } = bendTowardsLandmarks([wp], [far, castle], 1500)
+    expect(via.map((p) => p.name)).toEqual(['Burg'])
+    expect(distance(wps[0], castle.pos)).toBeLessThan(1)
+  })
+
+  it('reads Wikipedia tags and shortens stories', async () => {
+    const { parseWikipediaTag, shortStory } = await import('./wiki')
+    expect(parseWikipediaTag('de:Burg_Eberbach')).toEqual({ lang: 'de', title: 'Burg Eberbach' })
+    expect(parseWikipediaTag('kaputt')).toBeNull()
+    expect(shortStory('Erster Satz. Zweiter Satz ist länger. Dritter.', 40)).toBe('Erster Satz. Zweiter Satz ist länger.')
+    expect(shortStory('Erster Satz. Zweiter Satz ist länger. Dritter.', 20)).toBe('Erster Satz.')
+  })
+})
+
+describe('route splicing', () => {
+  it('cuts a route and joins it to another one with hints and segments in place', async () => {
+    const { sliceRoute, joinRoutes } = await import('./routeops')
+    const r = lineRoute([{ highway: 'track' }, { highway: 'path' }])
+    r.hints = [{ index: 75, along: r.cum[75], command: 5, exits: 0, angle: 90 }]
+    const tail = sliceRoute(r, 1200)
+    expect(tail.length).toBeCloseTo(r.length - 1200, -1)
+    expect(tail.segments[0].tags.highway).toBe('path')
+    expect(tail.hints[0].along).toBeCloseTo(r.cum[75] - 1200, -1)
+    // the first 1200 m of the same route, as a detour would end there
+    const k = r.cum.findIndex((c) => c > 1200)
+    const headCoords = [...r.coords.slice(0, k), pointAt(r.coords, r.cum, 1200)]
+    const headCum = cumulative(headCoords)
+    const head = { coords: headCoords, ele: headCoords.map(() => 300), cum: headCum, length: headCum.at(-1)!, segments: [{ start: 0, end: headCum.at(-1)!, tags: { highway: 'track' } }], hints: [] }
+    const joined = joinRoutes(head, tail)
+    expect(joined.length).toBeCloseTo(r.length, -1)
+    expect(joined.hints[0].along).toBeCloseTo(r.cum[75], -1)
+    expect(joined.segments.at(-1)!.end).toBeCloseTo(joined.length, -1)
+    expect(joined.segments.at(-1)!.tags.highway).toBe('path')
   })
 })
 

@@ -9,7 +9,7 @@ import { pointAt } from '../lib/geo'
 import type { PlannedRoute } from '../lib/planner'
 import { REGION } from '../lib/region'
 import type { RescuePoint } from '../lib/emergency'
-import type { Highlight } from '../lib/poi'
+import { CATEGORY_COLOR, type Highlight, type Poi } from '../lib/poi'
 
 // Vite pre-bundles maplibre, which breaks its own worker lookup: point it at the file.
 maplibregl.setWorkerUrl(workerUrl)
@@ -62,7 +62,9 @@ interface Props {
   /** the user dragged the map: stop following the position */
   onUserPan: () => void
   rescue: RescuePoint[]
-  highlights: Highlight[]
+  /** places to show: along the route, or the region's landmarks when there is none */
+  highlights: (Highlight | Poi)[]
+  onPoiClick: (index: number) => void
 }
 
 const empty = { type: 'FeatureCollection' as const, features: [] }
@@ -106,6 +108,16 @@ export function MapView(p: Props) {
     m.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')
     m.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left')
     m.on('click', (e) => {
+      // a place under the finger wins over everything else
+      const box: [[number, number], [number, number]] = [
+        [e.point.x - 12, e.point.y - 12],
+        [e.point.x + 12, e.point.y + 12],
+      ]
+      const place = m.getLayer('poi') ? m.queryRenderedFeatures(box, { layers: ['poi'] })[0] : undefined
+      if (place) {
+        props.current.onPoiClick(Number(place.properties?.i))
+        return
+      }
       const hit = m.queryRenderedFeatures(e.point, { layers: ['cand-line'] })
       const id = hit[0]?.properties?.id as string | undefined
       if (id && id !== props.current.selectedId) props.current.onSelect(id)
@@ -163,15 +175,28 @@ export function MapView(p: Props) {
         type: 'circle',
         source: 'poi',
         minzoom: 10,
-        paint: { 'circle-radius': 6, 'circle-color': '#00897b', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 },
+        paint: {
+          'circle-radius': ['match', ['get', 'importance'], 3, 8, 2, 6, 4.5],
+          'circle-color': ['get', 'color'],
+          'circle-stroke-color': '#fff',
+          'circle-stroke-width': 2,
+        },
       })
       m.addLayer({
         id: 'poi-label',
         type: 'symbol',
         source: 'poi',
-        minzoom: 12,
-        layout: { 'text-field': ['get', 'label'], 'text-font': ['Noto Sans Regular'], 'text-size': 11, 'text-offset': [0, 1.2], 'text-anchor': 'top', 'text-max-width': 12 },
-        paint: { 'text-color': '#00695c', 'text-halo-color': '#fff', 'text-halo-width': 1.5 },
+        minzoom: 11,
+        filter: ['>=', ['get', 'importance'], 2],
+        layout: {
+          'text-field': ['get', 'label'],
+          'text-font': ['Noto Sans Regular'],
+          'text-size': ['match', ['get', 'importance'], 3, 12, 11],
+          'text-offset': [0, 1.2],
+          'text-anchor': 'top',
+          'text-max-width': 12,
+        },
+        paint: { 'text-color': ['get', 'color'], 'text-halo-color': '#fff', 'text-halo-width': 1.5 },
       })
       m.addSource('rescue', { type: 'geojson', data: empty })
       m.addLayer({
@@ -212,7 +237,11 @@ export function MapView(p: Props) {
     })
     src('poi')?.setData({
       type: 'FeatureCollection',
-      features: cur.highlights.map((h) => ({ type: 'Feature', properties: { label: h.name ?? h.kind }, geometry: { type: 'Point', coordinates: h.pos } })),
+      features: cur.highlights.map((h, i) => ({
+        type: 'Feature',
+        properties: { i, label: h.name ?? h.kind, importance: h.importance ?? 1, color: CATEGORY_COLOR[h.category ?? 'nature'] },
+        geometry: { type: 'Point', coordinates: h.pos },
+      })),
     })
     src('rescue')?.setData({
       type: 'FeatureCollection',
