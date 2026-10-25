@@ -166,11 +166,32 @@ export function importanceOf(kind: PoiKind, t: Record<string, string>): 1 | 2 | 
   return 1
 }
 
-export async function fetchPois(bbox: [number, number, number, number], signal?: AbortSignal): Promise<Poi[]> {
-  const key = CACHE_PREFIX + bbox.map((v) => v.toFixed(2)).join(',')
+const poiKey = (bbox: number[]) => CACHE_PREFIX + bbox.map((v) => v.toFixed(2)).join(',')
+
+/** Cached places for an area, however old, with their age; null when none. */
+export function peekPois(bbox: [number, number, number, number]): { pois: Poi[]; ageDays: number } | null {
+  try {
+    const hit = JSON.parse(localStorage.getItem(poiKey(bbox)) ?? 'null') as { t: number; pois: Poi[] } | null
+    return hit?.pois ? { pois: hit.pois, ageDays: (Date.now() - hit.t) / 86400000 } : null
+  } catch {
+    return null
+  }
+}
+
+/** Stores places for an area as if fetched at time `t` (bundled region data). */
+export function seedPois(bbox: [number, number, number, number], pois: Poi[], t: number) {
+  try {
+    localStorage.setItem(poiKey(bbox), JSON.stringify({ t, pois }))
+  } catch {
+    // storage full
+  }
+}
+
+export async function fetchPois(bbox: [number, number, number, number], signal?: AbortSignal, force = false): Promise<Poi[]> {
+  const key = poiKey(bbox)
   try {
     const hit = JSON.parse(localStorage.getItem(key) ?? 'null') as { t: number; pois: Poi[] } | null
-    if (hit?.pois && Date.now() - hit.t < CACHE_DAYS * 86400000) return hit.pois
+    if (!force && hit?.pois && Date.now() - hit.t < CACHE_DAYS * 86400000) return hit.pois
   } catch {
     // no storage: fetch every time
   }

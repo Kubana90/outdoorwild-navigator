@@ -12,6 +12,7 @@ import { analyzeRoute, characterTags, describeRoute, km, lengthForMinutes } from
 import { fetchPois, highlightsAlongRoute, POI_ICON, type Highlight, type Poi } from './lib/poi'
 import { planDetour } from './lib/routeops'
 import { withRetry } from './lib/overpass'
+import { loadRegion, regionBbox } from './lib/regiondata'
 import { PoiSheet } from './components/PoiSheet'
 import { reverseGeocode } from './lib/geocode'
 import { distance, snapToLine, type LonLat } from './lib/geo'
@@ -98,35 +99,50 @@ export default function App() {
   const selected = candidates.find((c) => c.id === selectedId) ?? null
   const activeRoute = navRoute ?? selected
 
+  // the home region's places and rescue points: bundled with the app, refreshed in the background
+  const [regionRescue, setRegionRescue] = useState<RescuePoint[]>([])
+  useEffect(() => {
+    const ctrl = new AbortController()
+    loadRegion((d) => {
+      setRegionPois(d.pois)
+      setRegionRescue(d.rescue)
+    }, ctrl.signal).catch(() => {})
+    return () => ctrl.abort()
+  }, [])
+  const inHomeRegion = (coords: LonLat[]) => queryBbox(coords).every((v, i) => v === regionBbox()[i])
+
   // rescue points around the active route; cached, so they stay available offline
   useEffect(() => {
-    if (!activeRoute || rescue?.routeId === activeRoute.id) return
-    const ctrl = new AbortController()
+    if (!activeRoute) return
     const coords = activeRoute.raw.coords
+    if (inHomeRegion(coords)) {
+      setRescue({ routeId: activeRoute.id, all: regionRescue, along: rescueAlongRoute(coords, regionRescue) })
+      return
+    }
+    if (rescue?.routeId === activeRoute.id) return
+    const ctrl = new AbortController()
     withRetry(() => fetchRescuePoints(queryBbox(coords), ctrl.signal), ctrl.signal)
       .then((all) => setRescue({ routeId: activeRoute.id, all, along: rescueAlongRoute(coords, all) }))
       .catch(() => {})
     return () => ctrl.abort()
-  }, [activeRoute?.id])
+  }, [activeRoute?.id, regionRescue])
   const rescueHere = rescue && activeRoute && rescue.routeId === activeRoute.id ? rescue : null
-
-  useEffect(() => {
-    const ctrl = new AbortController()
-    withRetry(() => fetchPois(queryBbox([REGION.center]), ctrl.signal), ctrl.signal)
-      .then(setRegionPois)
-      .catch(() => {})
-    return () => ctrl.abort()
-  }, [])
 
   // places next to the active route
   useEffect(() => {
-    if (!activeRoute || highlights?.routeId === activeRoute.id) return
+    if (!activeRoute) return
+    const coords = activeRoute.raw.coords
+    if (inHomeRegion(coords)) {
+      setHighlights({ routeId: activeRoute.id, along: highlightsAlongRoute(activeRoute.raw, regionPois) })
+      return
+    }
+    if (highlights?.routeId === activeRoute.id) return
     const ctrl = new AbortController()
-    withRetry(() => fetchPois(queryBbox(activeRoute.raw.coords, 0.01), ctrl.signal), ctrl.signal)
+    withRetry(() => fetchPois(queryBbox(coords, 0.01), ctrl.signal), ctrl.signal)
       .then((pois) => setHighlights({ routeId: activeRoute.id, along: highlightsAlongRoute(activeRoute.raw, pois) }))
       .catch(() => {})
     return () => ctrl.abort()
-  }, [activeRoute?.id])
+  }, [activeRoute?.id, regionPois])
   const highlightsHere = highlights && activeRoute && highlights.routeId === activeRoute.id ? highlights.along : null
   // with no route on the map, show the region's landmarks to explore
   const landmarks = regionPois.filter((p) => p.category === 'history' && p.importance === 3)

@@ -39,11 +39,29 @@ export function bboxOf(coords: LonLat[], pad = 0.03): [number, number, number, n
 
 const cacheKey = (b: number[]) => CACHE_PREFIX + b.map((v) => v.toFixed(2)).join(',')
 
-export async function fetchRescuePoints(bbox: [number, number, number, number], signal?: AbortSignal): Promise<RescuePoint[]> {
+/** Cached rescue points for an area, however old; null when none. */
+export function peekRescuePoints(bbox: [number, number, number, number]): { points: RescuePoint[]; ageDays: number } | null {
+  try {
+    const hit = JSON.parse(localStorage.getItem(cacheKey(bbox)) ?? 'null') as { t: number; points: RescuePoint[] } | null
+    return hit?.points ? { points: hit.points, ageDays: (Date.now() - hit.t) / 86400000 } : null
+  } catch {
+    return null
+  }
+}
+
+export function seedRescuePoints(bbox: [number, number, number, number], points: RescuePoint[], t: number) {
+  try {
+    localStorage.setItem(cacheKey(bbox), JSON.stringify({ t, points }))
+  } catch {
+    // storage full
+  }
+}
+
+export async function fetchRescuePoints(bbox: [number, number, number, number], signal?: AbortSignal, force = false): Promise<RescuePoint[]> {
   const key = cacheKey(bbox)
   try {
     const hit = JSON.parse(localStorage.getItem(key) ?? 'null') as { t: number; points: RescuePoint[] } | null
-    if (hit?.points && Date.now() - hit.t < CACHE_DAYS * 86400000) return hit.points
+    if (!force && hit?.points && Date.now() - hit.t < CACHE_DAYS * 86400000) return hit.points
   } catch {
     // no storage: fetch every time
   }
