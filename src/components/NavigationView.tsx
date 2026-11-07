@@ -8,6 +8,8 @@ import type { PlannedRoute } from '../lib/planner'
 import { isBikeActivity } from '../lib/profile'
 import { ElevationChart } from './ElevationChart'
 import { keepScreenOn, watchPosition } from '../lib/native'
+import { phrase, styleFor, type NavEvent, type VoiceSettings } from '../lib/persona'
+import { say } from '../lib/speech'
 import { nearestRescue, type RescuePoint } from '../lib/emergency'
 import { detourCandidates, highlightLabel, onTheWay, POI_ICON, type Highlight } from '../lib/poi'
 import { fetchWikiSummary, shortStory } from '../lib/wiki'
@@ -18,6 +20,7 @@ interface Props {
   highlights: Highlight[]
   /** opens a place's sheet (story, detour button) */
   onPoiOpen: (h: Highlight) => void
+  voiceSettings: VoiceSettings
   onSos: () => void
   onFix: (fix: Fix | null) => void
   onDetour: (line: LonLat[] | null) => void
@@ -38,13 +41,10 @@ interface Detour {
 const GPS_STALE_MS = 20000
 const TRACK_KEY = 'owild-track'
 
-function speak(text: string, enabled: boolean) {
-  if (!enabled || !('speechSynthesis' in window)) return
-  const u = new SpeechSynthesisUtterance(text)
-  u.lang = 'de-DE'
-  u.rate = 1.05
-  speechSynthesis.cancel()
-  speechSynthesis.speak(u)
+/** Says an event in the chosen persona's words and voice. */
+function announce(e: NavEvent, enabled: boolean, settings: VoiceSettings) {
+  if (!enabled) return
+  say(phrase(settings.persona, e), styleFor(settings))
 }
 
 const vibrate = (pattern: number[]) => navigator.vibrate?.(pattern)
@@ -81,7 +81,7 @@ function useNow(everyMs: number): number {
   return now
 }
 
-export function NavigationView({ route, rescuePoints, highlights, onPoiOpen, onSos, onFix, onDetour, onExit, headingUp, onToggleHeadingUp, follow, onFollow }: Props) {
+export function NavigationView({ route, rescuePoints, highlights, onPoiOpen, voiceSettings, onSos, onFix, onDetour, onExit, headingUp, onToggleHeadingUp, follow, onFollow }: Props) {
   const navigator_ = useMemo(() => new Navigator(route.raw, route.analysis), [route])
   const [state, setState] = useState<NavState | null>(null)
   const [fix, setFix] = useState<Fix | null>(null)
@@ -96,6 +96,8 @@ export function NavigationView({ route, rescuePoints, highlights, onPoiOpen, onS
   const now = useNow(5000)
   const announced = useRef(new Set<string>())
   const wasOff = useRef(false)
+  /** how often the way was left on this tour: Günther gets grumpier */
+  const offCount = useRef(0)
   const deviate = useRef(0)
   const simRoute = useRef(route)
   const offSince = useRef<number | null>(null)
@@ -130,6 +132,11 @@ export function NavigationView({ route, rescuePoints, highlights, onPoiOpen, onS
       lock?.release().catch(() => {})
       keepScreenOn(false)
     }
+  }, [])
+
+  // greeting once per tour
+  useEffect(() => {
+    announce({ type: 'start' }, voice, voiceSettings)
   }, [])
 
   // real GPS (natively a background service, so it keeps going with the screen off)
@@ -180,7 +187,7 @@ export function NavigationView({ route, rescuePoints, highlights, onPoiOpen, onS
         setDetour({ raw, nav: new Navigator(raw, analyzeRoute(raw, route.options.activity)), state: null })
         onDetour(raw.coords)
         vibrate([80, 60, 80])
-        speak(`Rückweg berechnet: ${metres(raw.length)} bis zum Pfad.`, voice)
+        announce({ type: 'detourComputed', metres: raw.length }, voice, voiceSettings)
       })
       .catch(() => {})
       .finally(() => !ctrl.signal.aborted && setRerouting(false))
@@ -247,10 +254,11 @@ export function NavigationView({ route, rescuePoints, highlights, onPoiOpen, onS
     const a = announced.current
     if (state.offTrack && !wasOff.current) {
       vibrate([200, 100, 200, 100, 200])
-      speak(`Du hast den Weg verlassen. Der Weg liegt ${Math.round(state.guideDistance)} Meter Richtung ${compassWord(state.guideBearing)}.`, voice)
+      offCount.current++
+      announce({ type: 'offTrack', metres: state.guideDistance, direction: compassWord(state.guideBearing), count: offCount.current }, voice, voiceSettings)
     } else if (!state.offTrack && wasOff.current) {
       vibrate([80])
-      speak('Wieder auf dem Weg.', voice)
+      announce({ type: 'backOnTrack' }, voice, voiceSettings)
     }
     wasOff.current = state.offTrack
     if (state.offTrack) return
@@ -263,12 +271,12 @@ export function NavigationView({ route, rescuePoints, highlights, onPoiOpen, onS
       const left = h.angle < 0
       if (h.distance <= far && h.distance > near * 2 && !a.has(`f${h.index}`)) {
         a.add(`f${h.index}`)
-        speak(`In ${Math.round(h.distance / 10) * 10} Metern ${h.text}`, voice)
+        announce({ type: 'turnAhead', metres: h.distance, text: h.text }, voice, voiceSettings)
       }
       if (h.distance <= near && !a.has(`n${h.index}`)) {
         a.add(`n${h.index}`)
         vibrate(h.command === 1 ? [60] : left ? [120, 80, 120] : [450])
-        speak(h.text, voice)
+        announce({ type: 'turnNow', text: h.text }, voice, voiceSettings)
       }
     }
     const c = state.nextClimb
@@ -276,12 +284,12 @@ export function NavigationView({ route, rescuePoints, highlights, onPoiOpen, onS
       const key = `c${Math.round((state.along + c.inMetres) / 100)}`
       if (!a.has(key)) {
         a.add(key)
-        speak(`Gleich kommt ein Anstieg: ${Math.round(c.gain)} Höhenmeter auf ${Math.round(c.length / 10) * 10} Metern.`, voice)
+        announce({ type: 'climb', gain: c.gain, metres: c.length }, voice, voiceSettings)
       }
     }
     if (state.daylightBuffer !== null && state.daylightBuffer < 15 && !a.has('dark')) {
       a.add('dark')
-      speak('Achtung, du erreichst das Ziel voraussichtlich erst bei Dunkelheit. Prüfe, ob du umkehren oder abkürzen solltest.', voice)
+      announce({ type: 'dark' }, voice, voiceSettings)
     }
     // places right on the way: announced 300 m ahead, history with a sentence of its story
     const hl = onTheWay(highlights).find((x) => x.along > state.along && x.along - state.along <= 300)
@@ -291,7 +299,7 @@ export function NavigationView({ route, rescuePoints, highlights, onPoiOpen, onS
         a.add(key)
         const where = hl.side === 'am Weg' ? 'direkt am Weg' : hl.side
         const story = hl.category === 'history' ? stories.current.get(hl.name ?? hl.kind) : undefined
-        speak(`In ${Math.round((hl.along - state.along) / 50) * 50} Metern: ${hl.kind}${hl.name ? ` ${hl.name}` : ''}, ${where}.${story ? ` ${story}` : ''}`, voice)
+        announce({ type: 'highlight', metres: hl.along - state.along, label: `${hl.kind}${hl.name ? ` ${hl.name}` : ''}`, where, story, history: hl.category === 'history' }, voice, voiceSettings)
       }
     }
     // landmarks a bit off the way: offered as a detour once, when you're close
@@ -301,19 +309,19 @@ export function NavigationView({ route, rescuePoints, highlights, onPoiOpen, onS
       if (!a.has(key)) {
         a.add(key)
         vibrate([60, 60, 60])
-        speak(`Abstecher möglich: ${dc.kind}${dc.name ? ` ${dc.name}` : ''}, ${Math.round(dc.offset / 50) * 50} Meter ${dc.side}. Tippe auf die Karte unten für den Weg dorthin.`, voice)
+        announce({ type: 'detourOffer', label: `${dc.kind}${dc.name ? ` ${dc.name}` : ''}`, metres: dc.offset, side: dc.side }, voice, voiceSettings)
       }
     }
     const t = state.turnaround
     if (t?.advice === 'umkehren' && !a.has('turn')) {
       a.add('turn')
       vibrate([300, 150, 300])
-      speak(`Achtung: Bis zum Ziel reicht das Tageslicht nicht mehr. Umkehren bringt dich um ${clock(t.backArrival)} zurück zum Start.`, voice)
+      announce({ type: 'turnaround', back: clock(t.backArrival) }, voice, voiceSettings)
     }
     if (state.finished && !a.has('done')) {
       a.add('done')
       vibrate([100, 60, 100, 60, 300])
-      speak('Ziel erreicht. Schöne Tour!', voice)
+      announce({ type: 'finished' }, voice, voiceSettings)
     }
   }, [state])
 
@@ -325,7 +333,7 @@ export function NavigationView({ route, rescuePoints, highlights, onPoiOpen, onS
     if (h.distance <= near && !announced.current.has(`d${detour!.raw.length}-${h.index}`)) {
       announced.current.add(`d${detour!.raw.length}-${h.index}`)
       vibrate(h.angle < 0 ? [120, 80, 120] : [450])
-      speak(h.text, voice)
+      announce({ type: 'turnNow', text: h.text }, voice, voiceSettings)
     }
   }, [detour])
 
@@ -335,7 +343,7 @@ export function NavigationView({ route, rescuePoints, highlights, onPoiOpen, onS
     if (gpsStale && !announced.current.has('stale')) {
       announced.current.add('stale')
       vibrate([300])
-      speak('GPS-Signal verloren. Die Anzeige wird nicht mehr aktualisiert.', voice)
+      announce({ type: 'gpsLost' }, voice, voiceSettings)
     }
     if (!gpsStale) announced.current.delete('stale')
   }, [gpsStale])

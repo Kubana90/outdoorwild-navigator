@@ -396,6 +396,45 @@ describe('voice', () => {
   })
 })
 
+describe('voice persona', () => {
+  it('Günther says the instruction first and complete, then grumbles', async () => {
+    const { phrase } = await import('./persona')
+    const r = () => 0.3
+    const turn = phrase('guenther', { type: 'turnAhead', metres: 204, text: 'Rechts abbiegen auf Pfad' }, r)
+    expect(turn.startsWith('In 200 Metern Rechts abbiegen auf Pfad.')).toBe(true)
+    const off = phrase('guenther', { type: 'offTrack', metres: 61, direction: 'Norden', count: 3 }, r)
+    expect(off).toContain('Der Weg liegt 61 Meter Richtung Norden.')
+    // safety messages stay unmistakable
+    expect(phrase('guenther', { type: 'turnaround', back: '17:10' }, r)).toContain('Umkehren bringt dich um 17:10 zurück zum Start')
+    expect(phrase('guenther', { type: 'dark' }, r)).toMatch(/Dunkeln/)
+    expect(phrase('sachlich', { type: 'turnNow', text: 'Links abbiegen' }, r)).toBe('Links abbiegen')
+  })
+
+  it('gets grumpier the more often you leave the way', async () => {
+    const { phrase } = await import('./persona')
+    const first = phrase('guenther', { type: 'offTrack', metres: 50, direction: 'Osten', count: 1 }, () => 0)
+    const third = phrase('guenther', { type: 'offTrack', metres: 50, direction: 'Osten', count: 3 }, () => 0)
+    expect(first).not.toBe(third)
+    expect(third).toMatch(/aufgeben|gebe auf|enttäuscht|dritte/i)
+  })
+
+  it('a moody voice varies pitch and pace a little, a factual one does not', async () => {
+    const { styleFor } = await import('./persona')
+    const g1 = styleFor({ persona: 'guenther', voiceId: null }, () => 0)
+    const g2 = styleFor({ persona: 'guenther', voiceId: null }, () => 1)
+    expect(g1.rate).not.toBe(g2.rate)
+    expect(g1.pitch).toBeLessThan(0.8)
+    expect(styleFor({ persona: 'sachlich', voiceId: 'x' }, () => 0)).toEqual({ voiceId: 'x', pitch: 1, rate: 1.05 })
+  })
+
+  it('recognises male voice names', async () => {
+    const { guessMale } = await import('./speech')
+    expect(guessMale('Microsoft Stefan - German (Germany)')).toBe(true)
+    expect(guessMale('de-de-x-deb-local')).toBe(true)
+    expect(guessMale('Microsoft Katja - German (Germany)')).toBe(false)
+  })
+})
+
 describe('brouter parsing', () => {
   it('reads coordinates, way segments and voice hints', () => {
     const json = {

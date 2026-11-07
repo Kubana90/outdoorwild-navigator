@@ -14,6 +14,8 @@ import { planDetour } from './lib/routeops'
 import { withRetry } from './lib/overpass'
 import { loadRegion, regionBbox } from './lib/regiondata'
 import { PoiSheet } from './components/PoiSheet'
+import { VoicePicker } from './components/VoicePicker'
+import { loadVoiceSettings } from './lib/persona'
 import { reverseGeocode } from './lib/geocode'
 import { distance, snapToLine, type LonLat } from './lib/geo'
 import { download, fromGpx, toGpx } from './lib/gpx'
@@ -91,6 +93,7 @@ export default function App() {
   const [headingUp, setHeadingUp] = useState(true)
   const [sheetOpen, setSheetOpen] = useState(true)
   const [sosOpen, setSosOpen] = useState(false)
+  const [voiceSettings, setVoiceSettings] = useState(loadVoiceSettings)
   const [setupOpen, setSetupOpen] = useState(() => !setupDone())
   const [rescue, setRescue] = useState<{ routeId: string; all: RescuePoint[]; along: RescuePoint[] } | null>(null)
   const [highlights, setHighlights] = useState<{ routeId: string; along: Highlight[] } | null>(null)
@@ -432,6 +435,7 @@ export default function App() {
           rescuePoints={rescueHere?.all ?? []}
           highlights={highlightsHere ?? []}
           onPoiOpen={setPoiSheet}
+          voiceSettings={voiceSettings}
           onSos={() => setSosOpen(true)}
           onFix={setFix}
           onDetour={setDetour}
@@ -721,6 +725,8 @@ export default function App() {
               <input type="file" accept=".gpx,application/gpx+xml" onChange={(e) => e.target.files?.[0] && importGpx(e.target.files[0])} hidden />
             </label>
           </section>
+
+          <VoicePicker value={voiceSettings} onChange={setVoiceSettings} />
 
           <button className="link" onClick={() => setSetupOpen(true)}>
             ⚙ Berechtigungen prüfen

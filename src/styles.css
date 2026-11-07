@@ -1273,3 +1273,22 @@ button.poi-line {
 .poi-story p {
   margin: 0 0 8px;
 }
+
+/* ---------- voice ---------- */
+.voice-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.voice-picker h2 {
+  font-size: 15px;
+  margin: 0;
+}
+.voice-picker p {
+  margin: 0;
+}
+.voice-picker > button {
+  align-self: flex-start;
+}
